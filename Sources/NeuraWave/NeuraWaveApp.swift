@@ -25,6 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(session: SessionController.shared, showWindow: { Self.showWindow() })
 
         let arguments = ProcessInfo.processInfo.arguments
+
+        // Headless screenshot rendering for docs (--screenshot <path>):
+        // renders the real UI at 2x scale for a crisp README image.
+        if let idx = arguments.firstIndex(of: "--screenshot"), idx + 1 < arguments.count {
+            Self.renderScreenshot(to: arguments[idx + 1])
+        }
+
         let isAutotest = arguments.contains("--autotest")
 
         if !isAutotest {
@@ -92,6 +99,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let service = SMAppService.mainApp
         guard service.status != .enabled else { return }
         try? service.register()
+    }
+
+    static func renderScreenshot(to path: String) {
+        // NSHostingView snapshot is the reliable path (ImageRenderer produced
+        // a partially-drawn image under some system appearances).
+        let root = NSHostingView(rootView: ContentView().frame(width: 500))
+        root.frame = NSRect(x: 0, y: 0, width: 500, height: 700)
+        root.layoutSubtreeIfNeeded()
+        guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else {
+            fputs("screenshot render failed\n", stderr)
+            exit(1)
+        }
+        root.cacheDisplay(in: root.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            fputs("screenshot png encode failed\n", stderr)
+            exit(1)
+        }
+        do {
+            try png.write(to: URL(fileURLWithPath: path))
+            print("screenshot written to " + path)
+        } catch {
+            fputs("screenshot write failed\n", stderr)
+            exit(1)
+        }
+        exit(0)
     }
 
     private static func intArgument(_ arguments: [String], name: String, fallback: Int) -> Int {

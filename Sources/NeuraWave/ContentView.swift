@@ -11,8 +11,8 @@ struct ContentView: View {
     @StateObject private var session = SessionController.shared
 
     private let columns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10)
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
     ]
     private let durations = [15, 30, 45, 60, 90]
 
@@ -29,14 +29,14 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 9) {
             header
 
             sectionLabel("Focus programs — auto-advancing sequences")
             programRow
 
             WaveformView(isPlaying: session.isPlaying, beat: selected.beat, color: selected.color)
-                .frame(height: 110)
+                .frame(height: 76)
 
             sectionLabel("Presets")
             presetGrid
@@ -45,8 +45,8 @@ struct ContentView: View {
             footerRow
             errorRow
         }
-        .padding(18)
-        .frame(minWidth: 500, minHeight: 660)
+        .padding(14)
+        .frame(minWidth: 500, minHeight: 600)
         .onChange(of: volume) { _, newValue in
             UserDefaults.standard.set(newValue, forKey: "volume")
             session.updateLive(volume: newValue, noiseEnabled: noiseOn)
@@ -83,7 +83,7 @@ struct ContentView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("NeuraWave")
-                    .font(.system(size: 25, weight: .bold, design: .rounded))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
                 Text("Brainwave audio for focus, rest and sleep")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -118,45 +118,48 @@ struct ContentView: View {
     }
 
     private var programRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(FocusProgram.all) { program in
-                    let isOn = selectedProgram?.id == program.id
-                    Button {
-                        selectedProgram = isOn ? nil : program
-                        UserDefaults.standard.set(selectedProgram?.id ?? "", forKey: "program")
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(program.name)
-                                .font(.caption.weight(.semibold))
-                            Text(program.detail)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9)
-                                .fill(isOn ? Color.accentColor.opacity(0.16) : Color(nsColor: .quaternarySystemFill))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9)
-                                .stroke(isOn ? Color.accentColor : .clear, lineWidth: 1.5)
-                        )
+        HStack(spacing: 8) {
+            ForEach(FocusProgram.all) { program in
+                let isOn = selectedProgram?.id == program.id
+                Button {
+                    selectedProgram = isOn ? nil : program
+                    UserDefaults.standard.set(selectedProgram?.id ?? "", forKey: "program")
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(program.name)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Text(programSummary(program))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
-                    .disabled(session.isPlaying)
-                    .opacity(session.isPlaying ? 0.55 : 1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(width: 150, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isOn ? Color.accentColor.opacity(0.16) : Color(nsColor: .quaternarySystemFill))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isOn ? Color.accentColor : .clear, lineWidth: 1.5)
+                    )
                 }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .disabled(session.isPlaying)
+                .opacity(session.isPlaying ? 0.55 : 1)
             }
-            .padding(.horizontal, 1)
         }
     }
 
+    private func programSummary(_ program: FocusProgram) -> String {
+        program.steps.map { $0.preset.band }.joined(separator: "→")
+    }
+
     private var presetGrid: some View {
-        LazyVGrid(columns: columns, spacing: 10) {
+        LazyVGrid(columns: columns, spacing: 8) {
             ForEach(BrainwavePreset.all) { preset in
                 presetCard(preset)
             }
@@ -175,7 +178,7 @@ struct ContentView: View {
                 withNoise: noiseOn
             )
         } label: {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(preset.name)
                         .font(.headline)
@@ -205,8 +208,8 @@ struct ContentView: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(11)
-            .frame(maxWidth: .infinity, minHeight: 68, alignment: .topLeading)
+            .padding(8)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color(nsColor: .quaternarySystemFill))
@@ -221,7 +224,7 @@ struct ContentView: View {
     }
 
     private var styleRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Picker("Tone style", selection: $style) {
                 ForEach(ToneStyle.allCases) { tone in
                     Text(tone.rawValue).tag(tone)
