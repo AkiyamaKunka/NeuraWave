@@ -71,3 +71,7 @@ the program-advance scenario, and the 30-minute endurance run, which the
 script waits for — is `bash scripts/run-tests.sh`.
 
 Note: NeuraWave is for relaxation and focus. It is not medical advice and is not a treatment for sleep disorders.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
