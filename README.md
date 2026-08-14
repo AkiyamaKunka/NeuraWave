@@ -9,8 +9,9 @@ A small native macOS app that plays brainwave audio to help with focus, relaxati
 | Deep Sleep | Delta | 2.5 Hz | Deep, restorative sleep |
 | Meditation | Theta | 6 Hz | Calm and inner awareness |
 | Relax | Alpha | 10 Hz | Unwinding and stress relief |
-| Deep Focus | Beta | 18 Hz | Alert problem solving and coding |
-| Peak Concentration | Gamma | 40 Hz | High-level concentration |
+| Calm Focus | SMR | 14 Hz | Steady attention, low strain |
+| Deep Focus | Beta | 16 Hz | Active concentration and coding |
+| Peak Concentration | Gamma | 40 Hz | Peak processing (best in Isochronic) |
 
 ## Programs
 

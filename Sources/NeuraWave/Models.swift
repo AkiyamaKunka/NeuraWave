@@ -38,12 +38,21 @@ struct BrainwavePreset: Identifiable, Hashable {
             color: .green
         ),
         BrainwavePreset(
+            id: "calm-focus",
+            name: "Calm Focus",
+            band: "SMR",
+            beat: 14.0,
+            carrier: 190,
+            detail: "12-15 Hz · steady attention, low strain",
+            color: .blue
+        ),
+        BrainwavePreset(
             id: "focus",
             name: "Deep Focus",
             band: "Beta",
-            beat: 18.0,
-            carrier: 264,
-            detail: "13-30 Hz · alert problem solving",
+            beat: 16.0,
+            carrier: 220,
+            detail: "16 Hz · active concentration & problem solving",
             color: .orange
         ),
         BrainwavePreset(
@@ -51,11 +60,15 @@ struct BrainwavePreset: Identifiable, Hashable {
             name: "Peak Concentration",
             band: "Gamma",
             beat: 40.0,
-            carrier: 320,
-            detail: "30-100 Hz · high-level concentration",
+            carrier: 280,
+            detail: "40 Hz · peak processing — best in Isochronic",
             color: .pink
         )
     ]
+
+    static func byId(_ id: String) -> BrainwavePreset {
+        all.first { $0.id == id }!
+    }
 }
 
 /// A timed sequence of presets that auto-advances (click-free crossfade).

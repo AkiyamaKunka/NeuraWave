@@ -87,7 +87,7 @@ final class SessionController: ObservableObject {
             return
         }
         guard let last = lastStartConfig else {
-            start(preset: BrainwavePreset.all[3], style: .binaural, volume: 0.55, withNoise: false, minutes: nil)
+            start(preset: BrainwavePreset.byId("focus"), style: .binaural, volume: 0.55, withNoise: false, minutes: nil)
             return
         }
         start(preset: last.preset, style: last.style, volume: last.volume, withNoise: last.withNoise, minutes: last.minutes)

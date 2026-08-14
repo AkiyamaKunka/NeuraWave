@@ -70,6 +70,27 @@ NeuraWave is a focus/relaxation aid, not a medical device — see the disclaimer
 | Pink-noise layer optional | Meta-regression: masking doesn't change efficacy |
 | Honest copy: "effects are modest and vary by person" | g ≈ 0.45 with heterogeneity; entrainment weak vs monaural control; large inter-individual variability |
 
+## 2b. Frequency tuning (v1.3 — why 16 Hz focus, SMR 14 Hz, gamma in Isochronic)
+
+- **Lane et al. (1998, Physiology & Behavior)** tested beta binaural beats at
+  **16 Hz and 24 Hz** and found improved vigilance performance vs theta/delta.
+  16 Hz is a *directly tested* focus frequency — the reason Deep Focus moved
+  from 18 Hz → 16 Hz.
+- **Practical focus-band consensus** (focus-frequency guides, Mind Amend-style
+  isochronic tracks): **SMR 12-15 Hz and low beta 15-20 Hz** for concentration;
+  alpha 10 Hz for relaxed background focus. Added "Calm Focus" (SMR 14 Hz) as
+  the gentler tier between Relax and Deep Focus.
+- **Gamma 40 Hz** is hugely popular on YouTube ("Intense Study — 40Hz Gamma
+  Binaural Beats", "90分钟深度专注 | 40赫兹伽马双耳节拍"), but as a *binaural*
+  beat 40 Hz sits at the perceptual limit (Oster), and the 40 Hz ASSR
+  literature uses amplitude-modulated/click stimuli. Peak Concentration stays
+  40 Hz, but the UI now recommends **Isochronic** for it.
+- Carriers softened for comfort: Deep Focus 264→220 Hz, Peak 320→280 Hz
+  (carrier choice affects perceived tone quality, not the beat rate).
+- The user-reported "Hz feels high" matches the literature: binaural beats
+  above ~18 Hz are weakly perceived and can feel busy; the evidence favors
+  **12-16 Hz for sustained attention**.
+
 ## 3. Safety
 - Avoid theta/delta audio when operating machinery or driving (drowsiness).
 - Auditory steady-state stimulation is contraindicated for people with

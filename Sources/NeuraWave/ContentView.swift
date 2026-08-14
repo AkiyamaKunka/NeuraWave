@@ -19,7 +19,7 @@ struct ContentView: View {
     init() {
         let defaults = UserDefaults.standard
         let savedPreset = defaults.string(forKey: "preset")
-        _selected = State(initialValue: BrainwavePreset.all.first { $0.id == savedPreset } ?? BrainwavePreset.all[3])
+        _selected = State(initialValue: BrainwavePreset.all.first { $0.id == savedPreset } ?? BrainwavePreset.byId("focus"))
         _style = State(initialValue: ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural)
         _volume = State(initialValue: defaults.object(forKey: "volume") as? Double ?? 0.55)
         _noiseOn = State(initialValue: defaults.bool(forKey: "noise"))
@@ -32,11 +32,13 @@ struct ContentView: View {
         VStack(spacing: 14) {
             header
 
+            sectionLabel("Focus programs — auto-advancing sequences")
             programRow
 
             WaveformView(isPlaying: session.isPlaying, beat: selected.beat, color: selected.color)
                 .frame(height: 110)
 
+            sectionLabel("Presets")
             presetGrid
             styleRow
             volumeRow
@@ -44,7 +46,7 @@ struct ContentView: View {
             errorRow
         }
         .padding(18)
-        .frame(minWidth: 470, minHeight: 610)
+        .frame(minWidth: 500, minHeight: 660)
         .onChange(of: volume) { _, newValue in
             UserDefaults.standard.set(newValue, forKey: "volume")
             session.updateLive(volume: newValue, noiseEnabled: noiseOn)
@@ -101,6 +103,18 @@ struct ContentView: View {
                     .foregroundStyle(.green)
             }
         }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func beatLabel(_ beat: Double) -> String {
+        let trimmed = beat == beat.rounded() ? String(Int(beat)) : String(format: "%.1f", beat)
+        return trimmed + " Hz"
     }
 
     private var programRow: some View {
@@ -165,18 +179,25 @@ struct ContentView: View {
                 HStack {
                     Text(preset.name)
                         .font(.headline)
+                        .lineLimit(1)
                     Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(preset.color)
+                    }
+                }
+                HStack(spacing: 6) {
                     Text(preset.band)
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(preset.color.opacity(0.22)))
                         .foregroundStyle(preset.color)
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(preset.color)
-                    }
+                    Text(beatLabel(preset.beat))
+                        .font(.caption.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(preset.color)
                 }
                 Text(preset.detail)
                     .font(.caption)
@@ -229,6 +250,13 @@ struct ContentView: View {
                 }
                 .toggleStyle(.switch)
                 .controlSize(.small)
+            }
+
+            if selected.id == "peak" && style == .binaural {
+                Text("Tip: at 40 Hz a binaural beat sits near the edge of perception — switch to Isochronic for the strongest gamma effect.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
