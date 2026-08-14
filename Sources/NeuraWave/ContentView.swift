@@ -95,12 +95,12 @@ struct ContentView: View {
             }
             Spacer()
             if session.isPlaying {
-                Label("Playing", systemImage: "waveform")
+                Label(session.isPaused ? "Paused" : "Playing", systemImage: session.isPaused ? "pause.fill" : "waveform")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.green.opacity(0.18)))
-                    .foregroundStyle(.green)
+                    .background(Capsule().fill(session.isPaused ? Color.orange.opacity(0.18) : Color.green.opacity(0.18)))
+                    .foregroundStyle(session.isPaused ? .orange : .green)
             }
         }
     }
@@ -328,7 +328,9 @@ struct ContentView: View {
             }
 
             Button {
-                if session.isPlaying {
+                if session.isPlaying && session.isPaused {
+                    session.resumePlayback()
+                } else if session.isPlaying {
                     session.stop()
                 } else if let program = selectedProgram {
                     session.startProgram(program, style: style, volume: volume, withNoise: noiseOn)
@@ -343,8 +345,8 @@ struct ContentView: View {
                 }
             } label: {
                 Label(
-                    session.isPlaying ? "Stop" : "Start",
-                    systemImage: session.isPlaying ? "stop.fill" : "play.fill"
+                    session.isPlaying ? (session.isPaused ? "Resume" : "Stop") : "Start",
+                    systemImage: session.isPlaying ? (session.isPaused ? "play.fill" : "stop.fill") : "play.fill"
                 )
                 .font(.headline)
                 .padding(.horizontal, 20)

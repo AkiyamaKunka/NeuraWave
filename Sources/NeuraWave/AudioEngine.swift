@@ -54,7 +54,6 @@ private final class RealtimeState: @unchecked Sendable {
     func configure(preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool) {
         let next = Config(carrier: preset.carrier, beat: preset.beat, style: style, volume: volume, noiseEnabled: noiseEnabled)
         lock.withLock {
-            running = true
             if gain > 0.001 {
                 pendingConfig = next
             } else {
@@ -257,6 +256,7 @@ final class AudioEngine: ObservableObject {
         }
 
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
+        state.setRunning(true)
         engine.prepare()
 
         do {
@@ -301,6 +301,16 @@ final class AudioEngine: ObservableObject {
 
     func update(volume: Float, noiseEnabled: Bool) {
         state.update(volume: volume, noiseEnabled: noiseEnabled)
+    }
+
+    /// Pause/resume keep the session alive: the render thread fades the gain
+    /// to zero and back, so AirPods toggles are click-free.
+    func pause() {
+        state.setRunning(false)
+    }
+
+    func resume() {
+        state.setRunning(true)
     }
 
     var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64) {

@@ -8,7 +8,8 @@ let package = Package(
         .executableTarget(
             name: "NeuraWave",
             path: "Sources/NeuraWave",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [.linkedFramework("MediaPlayer")]
         )
     ]
 )

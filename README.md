@@ -33,6 +33,8 @@ menu bar soul.
   crossfade transitions.
 - 🌙 **Lives in the menu bar.** Close the window and it keeps playing. Starts at
   login silently — no sound until you press Start. Quits only when you quit it.
+- 🎧 **AirPods & Now Playing.** Single-press pauses/resumes with a click-free
+  fade, double-press skips presets, and live progress appears in Control Center.
 - 🔒 **Zero noise.** No accounts, no analytics, no network calls. Free, open
   source, MIT.
 

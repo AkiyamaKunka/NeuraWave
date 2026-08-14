@@ -15,7 +15,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
-        statusItem.button?.image = Self.icon(isPlaying: session.isPlaying)
+        statusItem.button?.image = Self.icon(isPlaying: session.isPlaying, paused: session.isPaused)
         statusItem.button?.toolTip = "NeuraWave"
         statusItem.button?.setAccessibilityLabel("NeuraWave")
 
@@ -24,8 +24,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
     }
 
-    private static func icon(isPlaying: Bool) -> NSImage? {
-        let symbol = isPlaying ? "waveform.circle.fill" : "waveform.circle"
+    private static func icon(isPlaying: Bool, paused: Bool = false) -> NSImage? {
+        let symbol = paused ? "pause.circle.fill" : (isPlaying ? "waveform.circle.fill" : "waveform.circle")
         return NSImage(systemSymbolName: symbol, accessibilityDescription: "NeuraWave")
     }
 
@@ -44,7 +44,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         let status = NSMenuItem(
-            title: session.isPlaying ? "Playing — tap to stop" : "Tap to start",
+            title: session.isPlaying
+                ? (session.isPaused ? "Paused — tap to resume" : "Playing — tap to pause")
+                : "Tap to start",
             action: #selector(togglePlayback),
             keyEquivalent: ""
         )
@@ -77,12 +79,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func togglePlayback() {
-        if session.isPlaying {
-            session.stop()
-        } else {
-            session.startLast()
-        }
-        statusItem.button?.image = Self.icon(isPlaying: session.isPlaying)
+        session.togglePlayPause()
+        statusItem.button?.image = Self.icon(isPlaying: session.isPlaying, paused: session.isPaused)
     }
 
     @objc private func openWindow() {

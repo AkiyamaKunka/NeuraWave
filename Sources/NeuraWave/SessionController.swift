@@ -9,12 +9,15 @@ final class SessionController: ObservableObject {
     static let shared = SessionController()
 
     @Published private(set) var isPlaying = false
+    @Published private(set) var isPaused = false
     @Published private(set) var remainingSeconds: Int?
     @Published private(set) var lastError: String?
     @Published private(set) var programTitle: String?
     @Published private(set) var programStep: (index: Int, count: Int)?
 
     let engine = AudioEngine()
+    private let nowPlaying = NowPlayingController.shared
+    private var sessionTitle = "NeuraWave"
     private var timer: Timer?
     private var endDate: Date?
     private var lastStartConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?)?
@@ -67,6 +70,8 @@ final class SessionController: ObservableObject {
         }
         isPlaying = engine.isPlaying
         guard isPlaying else { return }
+        isPaused = false
+        sessionTitle = preset.name
 
         if let minutes {
             endDate = Date().addingTimeInterval(Double(minutes) * 60)
@@ -78,6 +83,7 @@ final class SessionController: ObservableObject {
             timer?.invalidate()
             timer = nil
         }
+        pushNowPlaying()
     }
 
     /// Restarts the most recent configuration (used by the menu bar item).
@@ -109,8 +115,11 @@ final class SessionController: ObservableObject {
         programStartedAt = Date()
         programStep = (0, program.steps.count)
         programTitle = programTitleString(program, index: 0)
+        sessionTitle = program.name
+        isPaused = false
         remainingSeconds = Int(program.totalSeconds)
         scheduleCountdown()
+        pushNowPlaying()
     }
 
     private func programTitleString(_ program: FocusProgram, index: Int) -> String {
@@ -127,6 +136,8 @@ final class SessionController: ObservableObject {
         guard isPlaying else { return }
         engine.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
         lastStartConfig = (preset, style, volume, withNoise, lastStartConfig?.minutes)
+        sessionTitle = preset.name
+        pushNowPlaying()
     }
 
     /// Immediate volume/noise change while playing (no crossfade needed).
@@ -147,6 +158,8 @@ final class SessionController: ObservableObject {
         program = nil
         programStep = nil
         programTitle = nil
+        isPaused = false
+        nowPlaying.clear()
     }
 
     func clearError() {
@@ -177,6 +190,7 @@ final class SessionController: ObservableObject {
             stop()
         } else {
             remainingSeconds = remaining
+            pushNowPlaying()
         }
     }
 
@@ -198,6 +212,7 @@ final class SessionController: ObservableObject {
         if index != programStep?.index {
             programStep = (index, program.steps.count)
             programTitle = programTitleString(program, index: index)
+            sessionTitle = programTitle!
             let preset = program.steps[index].preset
             if let cfg = lastStartConfig {
                 engine.switchTo(preset: preset, style: cfg.style, volume: Float(cfg.volume), withNoise: cfg.withNoise)
@@ -208,6 +223,74 @@ final class SessionController: ObservableObject {
             }
         }
         remainingSeconds = Int(ceil(program.totalSeconds - elapsed))
+        pushNowPlaying()
+    }
+
+    // MARK: - Playback control (AirPods / Now Playing / menu bar)
+
+    func pausePlayback() {
+        guard isPlaying, !isPaused else { return }
+        isPaused = true
+        engine.pause()
+        pushNowPlaying()
+    }
+
+    func resumePlayback() {
+        guard isPlaying, isPaused else { return }
+        isPaused = false
+        engine.resume()
+        pushNowPlaying()
+    }
+
+    func resumeOrStart() {
+        if isPlaying {
+            resumePlayback()
+        } else {
+            startLast()
+        }
+    }
+
+    func togglePlayPause() {
+        if isPlaying {
+            if isPaused {
+                resumePlayback()
+            } else {
+                pausePlayback()
+            }
+        } else {
+            startLast()
+        }
+    }
+
+    /// AirPods double-press: step through presets while a session is active.
+    func nextPreset() {
+        stepPreset(by: 1)
+    }
+
+    func previousPreset() {
+        stepPreset(by: -1)
+    }
+
+    private func stepPreset(by delta: Int) {
+        guard isPlaying, let cfg = lastStartConfig else { return }
+        let all = BrainwavePreset.all
+        guard let currentIndex = all.firstIndex(where: { $0.id == cfg.preset.id }) else { return }
+        let nextIndex = (currentIndex + delta + all.count) % all.count
+        switchPreset(preset: all[nextIndex], style: cfg.style, volume: cfg.volume, withNoise: cfg.withNoise)
+    }
+
+    private func pushNowPlaying() {
+        guard isPlaying else { return }
+        var elapsed: TimeInterval = 0
+        var duration: TimeInterval?
+        if let program {
+            duration = program.totalSeconds
+            elapsed = min(Date().timeIntervalSince(programStartedAt), program.totalSeconds)
+        } else if let end = endDate, let minutes = lastStartConfig?.minutes {
+            duration = Double(minutes * 60)
+            elapsed = max(0, duration! - Double(remainingSeconds ?? 0))
+        }
+        nowPlaying.update(title: sessionTitle, elapsed: elapsed, duration: duration, playing: true, paused: isPaused)
     }
 
     // MARK: - Automated self-test (launched with --autotest)
