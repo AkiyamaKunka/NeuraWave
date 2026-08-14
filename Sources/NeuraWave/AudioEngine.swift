@@ -257,6 +257,10 @@ final class AudioEngine: ObservableObject {
 
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
         state.setRunning(true)
+        // Publishing Now Playing info briefly marks the app "inactive" on
+        // macOS; with auto-shutdown enabled the engine suspends itself and
+        // rendering freezes. Keep it alive — we teardown explicitly on stop.
+        engine.isAutoShutdownEnabled = false
         engine.prepare()
 
         do {
