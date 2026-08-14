@@ -1,6 +1,39 @@
-# NeuraWave
+# 🌊 NeuraWave
 
-A small native macOS app that plays brainwave audio to help with focus, relaxation, and sleep.
+**Brainwave audio for focus, rest and sleep** — a tiny, native macOS app that plays
+scientifically-tuned binaural and isochronic tones, with smart focus programs and a
+menu bar that never gets in your way.
+
+[![CI](https://github.com/AkiyamaKunka/NeuraWave/actions/workflows/ci.yml/badge.svg)](https://github.com/AkiyamaKunka/NeuraWave/actions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)]()
+[![Release](https://img.shields.io/badge/release-v1.3.0-orange)](https://github.com/AkiyamaKunka/NeuraWave/releases)
+
+![NeuraWave window](docs/screenshot.png)
+
+## Why NeuraWave
+
+- **Frequencies tuned to the evidence, not the hype.** Deep Focus runs at 16 Hz
+  (the beta rate Lane et al., 1998, actually tested for vigilance), Calm Focus at
+  14 Hz SMR, and 40 Hz gamma ships with the honest advice that it works best in
+  Isochronic mode. Full rationale in [RESEARCH.md](RESEARCH.md).
+- **Focus programs** that think ahead: settle in with Alpha, then ramp into the
+  work band — Study Flow, Coding Sprint, and Mental Rest. Presets auto-advance
+  through a **click-free crossfade**.
+- **Lives in the menu bar.** Closes to a menu bar icon, starts at login silently
+  (no sound until you press Start), and quits only when you actually quit it.
+- **Zero noise.** No accounts, no analytics, no network calls. Your Mac stays
+  awake during sessions; it remembers your settings between launches.
+
+## Install
+
+1. Grab **NeuraWave-1.3.0.dmg** from [Releases](https://github.com/AkiyamaKunka/NeuraWave/releases).
+2. Open the DMG and drag NeuraWave into Applications.
+3. First launch: **right-click the app → Open** (the app is ad-hoc signed, so
+   Gatekeeper asks once; after that it launches normally).
+
+> Want it frictionless? It needs Apple Developer ID signing + notarization
+> (a $99/year Apple Developer Program account). The CI is ready for it.
 
 ## Presets
 
@@ -13,10 +46,9 @@ A small native macOS app that plays brainwave audio to help with focus, relaxati
 | Deep Focus | Beta | 16 Hz | Active concentration and coding |
 | Peak Concentration | Gamma | 40 Hz | Peak processing (best in Isochronic) |
 
-## Programs
+## Focus programs
 
-Timed preset sequences that auto-advance (click-free crossfade). Step design
-follows the evidence in [RESEARCH.md](RESEARCH.md).
+Timed sequences that auto-advance with a click-free crossfade.
 
 | Program | Sequence | Total |
 | --- | --- | --- |
@@ -24,33 +56,32 @@ follows the evidence in [RESEARCH.md](RESEARCH.md).
 | Coding Sprint | Beta warm-up (8 min) → Gamma peak (30 min) → Alpha cool-down (5 min) | 43 min |
 | Mental Rest | Alpha (6 min) → Theta (20 min) → Alpha return (4 min) | 30 min |
 
-Notes: the Gamma step is best in **Isochronic** mode (40 Hz auditory
-steady-state research uses amplitude-modulated tones; a 40 Hz binaural beat
-sits at the edge of perception). Theta only appears in Mental Rest because it
-can cause drowsiness. The default timer is now **off** for manual presets —
-programs carry their own duration.
-
 ## Features
 
 - Binaural tones (headphones recommended) and isochronic tones (work with speakers)
 - Optional pink-noise layer to mask distracting background sounds
 - Volume control and a session timer (no timer, 15, 30, 45, 60, or 90 minutes)
 - Click-free switching: presets and tone styles crossfade through silence instead of cutting
-- Smooth fade-in and fade-out, and the Mac stays awake during a session
-- Keeps playing when the window closes, with a menu bar item for start/stop and quit
-- Starts at login (menu bar only after the window is closed; no sound until you press Start) — toggle via the menu bar's "Launch at Login"
-- Quits only from the menu bar's Quit or Cmd+Q — closing or minimizing the window never stops it
+- Smooth fade-in and fade-out; the Mac stays awake during a session
+- Keeps playing when the window closes; menu bar item for start/stop, countdown, and quit
+- Starts at login (menu bar only; no sound until you press Start) — toggle via the menu bar's "Launch at Login"
+- Quits only from the menu bar's Quit or Cmd+Q — closing or minimizing never stops it
 - Remembers your last preset, tone style, volume, noise, timer, and program between launches
 
-## Building
+## The science
+
+NeuraWave is honest about the evidence: binaural beats show a medium effect in
+meta-analysis (Garcia-Argibay et al., 2019, g ≈ 0.45) with real but weak cortical
+entrainment (Orozco Perez et al., 2020), and effects vary by person. Every design
+decision — frequencies, program structure, gamma-in-isochronic — is documented
+with sources in [RESEARCH.md](RESEARCH.md).
+
+## Build from source
 
 ```bash
-swift scripts/make-icon.swift packaging/icon.iconset
-iconutil -c icns packaging/icon.iconset -o packaging/AppIcon.icns
-bash scripts/package-app.sh release
+swift build                          # debug build
+bash scripts/package-app.sh release  # assembles build/NeuraWave.app
 ```
-
-The finished app is written to `build/NeuraWave.app`. Copy it to `/Applications` if you like.
 
 ## Testing
 
@@ -58,20 +89,22 @@ The app has a hidden self-test mode that exercises every preset, tone style,
 noise setting, volume change, timer, and stop/restart path:
 
 ```bash
-# 8-second smoke test, switching configuration every 3 seconds
-build/NeuraWave.app/Contents/MacOS/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 3
+# 8-second smoke test, switching configuration every 2 seconds
+build/NeuraWave.app/Contents/MacOS/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2
 
-# 30-minute endurance run
-build/NeuraWave.app/Contents/MacOS/NeuraWave --autotest --autotest-seconds 1800 --autotest-cycle 30
+# The full battery with pass/fail reporting — including the 30-minute
+# endurance run — is bash scripts/run-tests.sh
 ```
 
-It logs configuration switches plus audio-engine diagnostics (frames rendered,
-NaN count, clip count, crossfade-switch count) and prints `AUTOTEST_COMPLETE`
-when finished. The full battery with pass/fail reporting — quick scenarios,
-the program-advance scenario, and the 30-minute endurance run, which the
-script waits for — is `bash scripts/run-tests.sh`.
+CI on GitHub Actions builds and runs the smoke, stop/restart, and
+program-advance scenarios on a clean macOS runner on every push.
 
-Note: NeuraWave is for relaxation and focus. It is not medical advice and is not a treatment for sleep disorders.
+## Safety
+
+- Avoid theta/delta audio when driving or operating machinery (drowsiness).
+- Not for people with seizure disorders triggered by rhythmic audio/visual stimuli.
+- NeuraWave is for relaxation and focus. It is not medical advice and is not a
+  treatment for sleep or attention disorders.
 
 ## License
 
