@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-autotest:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build
+
+      - name: Smoke autotest (8s, crossfade switches)
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2 | tee /tmp/smoke.log && grep -q AUTOTEST_COMPLETE /tmp/smoke.log
+
+      - name: Stop/restart autotest (16s)
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 16 --autotest-cycle 3 --autotest-stop-at 6 | tee /tmp/stop.log && grep -q AUTOTEST_COMPLETE /tmp/stop.log
+
+      - name: Program-advance autotest (45s, Alpha→Beta→Gamma)
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 45 --autotest-cycle 30 --autotest-program-seconds 45 | tee /tmp/prog.log && grep -q "PROGRAM_STEP 3/3" /tmp/prog.log && grep -q AUTOTEST_COMPLETE /tmp/prog.log

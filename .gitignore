@@ -1,0 +1,9 @@
+.DS_Store
+.build/
+build/
+test-results/
+NeuraWave-*.zip
+/live-window.png
+/screenshot-final.png
+/screenshot-user.png
+*.log
