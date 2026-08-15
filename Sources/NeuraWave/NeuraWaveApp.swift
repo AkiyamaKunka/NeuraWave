@@ -70,7 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 timerMinutes: timerMinutes > 0 ? timerMinutes : nil,
                 stopAtSeconds: stopAt,
                 volume: volume,
-                programSeconds: programSeconds
+                programSeconds: programSeconds,
+                arguments: arguments
             )
         }
     }

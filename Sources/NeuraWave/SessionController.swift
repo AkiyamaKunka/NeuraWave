@@ -37,6 +37,11 @@ final class SessionController: ObservableObject {
     private var autotestStopPerformed = false
     private var autotestTimerVerified = false
     private var autotestVolume: Double = 0.08
+    private var autotestPauseAt = 0
+    private var autotestResumeAt = 0
+    private var autotestPausePerformed = false
+    private var autotestResumePerformed = false
+    private var autotestArguments: [String] = []
 
     private struct AutoTestConfig {
         let preset: BrainwavePreset
@@ -238,8 +243,13 @@ final class SessionController: ObservableObject {
     func resumePlayback() {
         guard isPlaying, isPaused else { return }
         isPaused = false
-        engine.resume()
+        engine.restartAfterPause()
         pushNowPlaying()
+        // Some macOS versions re-sync Now Playing state shortly after a rate
+        // change; re-push once the fade-in is underway.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.pushNowPlaying()
+        }
     }
 
     func resumeOrStart() {
@@ -301,10 +311,12 @@ final class SessionController: ObservableObject {
         timerMinutes: Int?,
         stopAtSeconds: Int,
         volume: Double,
-        programSeconds: Int
+        programSeconds: Int,
+        arguments: [String] = []
     ) {
         guard !autotestRunning else { return }
         setvbuf(stdout, nil, _IOLBF, 0)
+        autotestArguments = arguments
         autotestRunning = true
         autotestConfigIndex = 0
         autotestStartedAt = Date()
@@ -317,6 +329,10 @@ final class SessionController: ObservableObject {
         autotestTimerVerified = false
         autotestVolume = volume
         autotestProgram = programSeconds > 0
+        autotestPauseAt = intArgument(arguments, name: "--autotest-pause-at", fallback: 0)
+        autotestResumeAt = intArgument(arguments, name: "--autotest-resume-at", fallback: 0)
+        autotestPausePerformed = false
+        autotestResumePerformed = false
 
         let first = Self.autotestConfigs[0]
         if autotestProgram {
@@ -400,6 +416,18 @@ final class SessionController: ObservableObject {
             logAutoTest("cycle diag -> \(autotestSnapshot())")
         }
 
+        if autotestPauseAt > 0, !autotestPausePerformed, Int(elapsed) >= autotestPauseAt, isPlaying, !isPaused {
+            autotestPausePerformed = true
+            pausePlayback()
+            logAutoTest("AUTOTEST_PAUSE at \(Int(elapsed))s -> \(autotestSnapshot())")
+        }
+
+        if autotestResumeAt > 0, !autotestResumePerformed, Int(elapsed) >= autotestResumeAt, isPlaying, isPaused {
+            autotestResumePerformed = true
+            resumePlayback()
+            logAutoTest("AUTOTEST_RESUME at \(Int(elapsed))s -> \(autotestSnapshot())")
+        }
+
         if elapsed >= Double(autotestTotal) {
             autotestTimer?.invalidate()
             autotestTimer = nil
@@ -425,7 +453,22 @@ final class SessionController: ObservableObject {
 
     private func autotestSnapshot() -> String {
         let diagnostics = engine.diagnostics
-        return "frames=\(diagnostics.frames) nan=\(diagnostics.nan) clips=\(diagnostics.clips) switches=\(diagnostics.switches) playing=\(isPlaying)"
+        return "frames=\(diagnostics.frames) nan=\(diagnostics.nan) clips=\(diagnostics.clips) switches=\(diagnostics.switches) gain=\(String(format: "%.2f", diagnostics.gain)) playing=\(isPlaying)"
+    }
+
+    private func intArgument(_ arguments: [String], name: String, fallback: Int) -> Int {
+        guard let raw = argumentValue(arguments, name: name) else { return fallback }
+        return Int(raw) ?? fallback
+    }
+
+    private func argumentValue(_ arguments: [String], name: String) -> String? {
+        if let equalsForm = arguments.first(where: { $0.hasPrefix(name + "=") }) {
+            return String(equalsForm.dropFirst(name.count + 1))
+        }
+        if let index = arguments.firstIndex(of: name), index + 1 < arguments.count {
+            return arguments[index + 1]
+        }
+        return nil
     }
 
     private func logAutoTest(_ message: String) {

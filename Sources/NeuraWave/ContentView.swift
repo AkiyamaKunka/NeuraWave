@@ -35,7 +35,7 @@ struct ContentView: View {
             sectionLabel("Focus programs — auto-advancing sequences")
             programRow
 
-            WaveformView(isPlaying: session.isPlaying, beat: selected.beat, color: selected.color)
+            WaveformView(isPlaying: session.isPlaying, isPaused: session.isPaused, beat: selected.beat, color: selected.color)
                 .frame(height: 76)
 
             sectionLabel("Presets")

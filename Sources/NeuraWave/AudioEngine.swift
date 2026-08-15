@@ -206,10 +206,10 @@ private final class RealtimeState: @unchecked Sendable {
         lock.unlock()
     }
 
-    func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64) {
+    func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
         lock.lock()
         defer { lock.unlock() }
-        return (framesRendered, nanCount, clipCount, switchCount)
+        return (framesRendered, nanCount, clipCount, switchCount, gain)
     }
 
     private func applyConfig(_ next: Config) {
@@ -228,12 +228,14 @@ final class AudioEngine: ObservableObject {
     private var sourceNode: AVAudioSourceNode?
     private var stopGeneration = 0
     private var keepAwakeActivity: NSObjectProtocol?
+    private var lastConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool)?
 
     /// Builds the output node on first use and (re)uses it for every later
     /// session. Returns false when no usable output device/format is available.
     @discardableResult
     func start(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) -> Bool {
         stopGeneration += 1
+        lastConfig = (preset, style, volume, noiseEnabled)
 
         if sourceNode == nil {
             let output = engine.outputNode
@@ -315,9 +317,24 @@ final class AudioEngine: ObservableObject {
 
     func resume() {
         state.setRunning(true)
+        // If macOS suspended the engine while we were silent, wake it back up
+        // (engine.start() is idempotent when already running).
+        if !engine.isRunning {
+            try? engine.start()
+        }
     }
 
-    var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64) {
+    /// Full output-chain restart: tears down and rebuilds the audio route,
+    /// clearing any system-level mute/route state that may have been applied
+    /// while the app was paused. Fades back in from silence.
+    func restartAfterPause() {
+        teardownNode()
+        if let cfg = lastConfig {
+            _ = start(preset: cfg.preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.noiseEnabled)
+        }
+    }
+
+    var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
         state.diagnostics()
     }
 
