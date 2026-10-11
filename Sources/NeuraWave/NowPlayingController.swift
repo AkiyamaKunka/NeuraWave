@@ -1,3 +1,4 @@
+import AppKit
 import MediaPlayer
 
 /// Now Playing / remote-control bridge: registers NeuraWave as the macOS
@@ -6,6 +7,12 @@ import MediaPlayer
 @MainActor
 final class NowPlayingController {
     static let shared = NowPlayingController()
+
+    /// The app icon as Control Center / Now Playing artwork.
+    private lazy var artwork: MPMediaItemArtwork? = {
+        guard let icon = NSApp?.applicationIconImage else { return nil }
+        return MPMediaItemArtwork(boundsSize: icon.size) { _ in icon }
+    }()
 
     private init() {
         let center = MPRemoteCommandCenter.shared()
@@ -47,6 +54,9 @@ final class NowPlayingController {
             MPNowPlayingInfoPropertyPlaybackRate: playing && !paused ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
         ]
+        if let artwork {
+            info[MPMediaItemPropertyArtwork] = artwork
+        }
         if let duration, duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
