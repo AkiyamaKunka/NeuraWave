@@ -21,7 +21,7 @@ final class SessionController: ObservableObject {
 
     let engine = AudioEngine()
     private let nowPlaying = NowPlayingController.shared
-    private var sessionTitle = "NeuraWave"
+    @Published private(set) var sessionTitle = "NeuraWave"
     private var timer: Timer?
     private var endDate: Date?
     private var lastStartConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?)?

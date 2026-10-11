@@ -285,6 +285,7 @@ struct ContentView: View {
             Image(systemName: "speaker.fill")
                 .foregroundStyle(.secondary)
             Slider(value: $volume, in: 0.05...1.0)
+                .accessibilityLabel("Volume")
             Image(systemName: "speaker.wave.3.fill")
                 .foregroundStyle(.secondary)
         }
@@ -396,6 +397,14 @@ struct ContentView: View {
                 .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
+            // Space starts (and, via the Pause button, pauses/resumes);
+            // ⌘. stops — the standard macOS "stop" shortcut.
+            .keyboardShortcut(
+                session.isPlaying
+                    ? KeyboardShortcut(".", modifiers: .command)
+                    : KeyboardShortcut(.space, modifiers: [])
+            )
+            .help(session.isPlaying ? "Stop (⌘.)" : "Start (Space)")
         }
     }
 

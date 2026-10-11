@@ -23,9 +23,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         // Keep the menu bar icon in sync with every start/stop/pause/resume,
         // including state changes initiated from the main window.
-        session.$isPlaying.combineLatest(session.$isPaused)
-            .sink { [weak self] playing, paused in
-                self?.statusItem.button?.image = Self.icon(isPlaying: playing, paused: paused)
+        session.$isPlaying.combineLatest(session.$isPaused, session.$sessionTitle)
+            .sink { [weak self] playing, paused, title in
+                guard let self else { return }
+                self.statusItem.button?.image = Self.icon(isPlaying: playing, paused: paused)
+                // Hovering the icon tells you what is playing.
+                self.statusItem.button?.toolTip = playing
+                    ? "NeuraWave — \(title)\(paused ? " (paused)" : "")"
+                    : "NeuraWave"
             }
             .store(in: &cancellables)
 
