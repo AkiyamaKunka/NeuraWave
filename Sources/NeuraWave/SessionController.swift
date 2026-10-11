@@ -14,6 +14,8 @@ final class SessionController: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var programTitle: String?
     @Published private(set) var programStep: (index: Int, count: Int)?
+    @Published private(set) var isRunningProgram = false
+    @Published private(set) var currentPreset: BrainwavePreset = BrainwavePreset.byId("focus")
 
     let engine = AudioEngine()
     private let nowPlaying = NowPlayingController.shared
@@ -21,6 +23,13 @@ final class SessionController: ObservableObject {
     private var timer: Timer?
     private var endDate: Date?
     private var lastStartConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?)?
+    /// Pause bookkeeping: pausing freezes the countdown (timer and program),
+    /// resuming resumes it — a paused session never expires underneath you.
+    private var pausedRemainingSeconds: Int?
+    private var programPausedAt: Date?
+    private var programPauseTotal: TimeInterval = 0
+    /// Whole-second throttle for Now Playing metadata pushes.
+    private var lastPushedSecond = -1
     private var program: FocusProgram?
     private var programStartedAt = Date()
     private var lastProgram: FocusProgram?
@@ -76,6 +85,10 @@ final class SessionController: ObservableObject {
         isPlaying = engine.isPlaying
         guard isPlaying else { return }
         isPaused = false
+        lastError = nil
+        resetPauseBookkeeping()
+        isRunningProgram = false
+        currentPreset = preset
         sessionTitle = preset.name
 
         if let minutes {
@@ -98,7 +111,7 @@ final class SessionController: ObservableObject {
             return
         }
         guard let last = lastStartConfig else {
-            start(preset: BrainwavePreset.byId("focus"), style: .binaural, volume: 0.55, withNoise: false, minutes: nil)
+            start(preset: BrainwavePreset.byId("focus"), style: .binaural, volume: 0.385, withNoise: false, minutes: nil)
             return
         }
         start(preset: last.preset, style: last.style, volume: last.volume, withNoise: last.withNoise, minutes: last.minutes)
@@ -116,6 +129,10 @@ final class SessionController: ObservableObject {
             return
         }
         isPlaying = true
+        lastError = nil
+        resetPauseBookkeeping()
+        isRunningProgram = true
+        currentPreset = first
         self.program = program
         programStartedAt = Date()
         programStep = (0, program.steps.count)
@@ -141,6 +158,7 @@ final class SessionController: ObservableObject {
         guard isPlaying else { return }
         engine.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
         lastStartConfig = (preset, style, volume, withNoise, lastStartConfig?.minutes)
+        currentPreset = preset
         sessionTitle = preset.name
         pushNowPlaying()
     }
@@ -164,11 +182,20 @@ final class SessionController: ObservableObject {
         programStep = nil
         programTitle = nil
         isPaused = false
+        isRunningProgram = false
+        resetPauseBookkeeping()
         nowPlaying.clear()
     }
 
     func clearError() {
         lastError = nil
+    }
+
+    private func resetPauseBookkeeping() {
+        pausedRemainingSeconds = nil
+        programPausedAt = nil
+        programPauseTotal = 0
+        lastPushedSecond = -1
     }
 
     private func scheduleCountdown() {
@@ -190,17 +217,22 @@ final class SessionController: ObservableObject {
         }
         guard let end = endDate else { return }
         // Deadline-based: immune to timer drift and run-loop stalls.
+        // (endDate is nil while paused, so a paused countdown stays frozen.)
         let remaining = Int(ceil(end.timeIntervalSinceNow))
         if remaining <= 0 {
             stop()
         } else {
             remainingSeconds = remaining
-            pushNowPlaying()
+            if remaining != lastPushedSecond {
+                lastPushedSecond = remaining
+                pushNowPlaying()
+            }
         }
     }
 
     private func tickProgram(_ program: FocusProgram) {
-        let elapsed = Date().timeIntervalSince(programStartedAt)
+        guard !isPaused else { return } // paused programs freeze in place
+        let elapsed = Date().timeIntervalSince(programStartedAt) - programPauseTotal
         if elapsed >= program.totalSeconds {
             stop() // fade out; stop() also clears the program state
             return
@@ -222,13 +254,18 @@ final class SessionController: ObservableObject {
             if let cfg = lastStartConfig {
                 engine.switchTo(preset: preset, style: cfg.style, volume: Float(cfg.volume), withNoise: cfg.withNoise)
                 lastStartConfig = (preset, cfg.style, cfg.volume, cfg.withNoise, nil)
+                currentPreset = preset
             }
             if autotestRunning {
                 logAutoTest("PROGRAM_STEP \(index + 1)/\(program.steps.count) \(preset.name) -> \(autotestSnapshot())")
             }
         }
         remainingSeconds = Int(ceil(program.totalSeconds - elapsed))
-        pushNowPlaying()
+        let second = Int(elapsed)
+        if second != lastPushedSecond {
+            lastPushedSecond = second
+            pushNowPlaying()
+        }
     }
 
     // MARK: - Playback control (AirPods / Now Playing / menu bar)
@@ -236,6 +273,15 @@ final class SessionController: ObservableObject {
     func pausePlayback() {
         guard isPlaying, !isPaused else { return }
         isPaused = true
+        if endDate != nil {
+            // Freeze the countdown: the deadline is parked while paused and
+            // reinstated with the same remaining time on resume.
+            pausedRemainingSeconds = Int(ceil(endDate!.timeIntervalSinceNow))
+            endDate = nil
+        }
+        if program != nil {
+            programPausedAt = Date()
+        }
         engine.pause()
         pushNowPlaying()
     }
@@ -243,6 +289,14 @@ final class SessionController: ObservableObject {
     func resumePlayback() {
         guard isPlaying, isPaused else { return }
         isPaused = false
+        if let frozen = pausedRemainingSeconds {
+            endDate = Date().addingTimeInterval(Double(frozen))
+            pausedRemainingSeconds = nil
+        }
+        if let pausedAt = programPausedAt {
+            programPauseTotal += Date().timeIntervalSince(pausedAt)
+            programPausedAt = nil
+        }
         engine.restartAfterPause()
         pushNowPlaying()
         // Some macOS versions re-sync Now Playing state shortly after a rate
@@ -296,9 +350,10 @@ final class SessionController: ObservableObject {
         if let program {
             duration = program.totalSeconds
             elapsed = min(Date().timeIntervalSince(programStartedAt), program.totalSeconds)
-        } else if let end = endDate, let minutes = lastStartConfig?.minutes {
-            duration = Double(minutes * 60)
-            elapsed = max(0, duration! - Double(remainingSeconds ?? 0))
+        } else if let minutes = lastStartConfig?.minutes {
+            let total = Double(minutes * 60)
+            duration = total
+            elapsed = max(0, total - Double(remainingSeconds ?? 0))
         }
         nowPlaying.update(title: sessionTitle, elapsed: elapsed, duration: duration, playing: true, paused: isPaused)
     }

@@ -4,7 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var selected = BrainwavePreset.all[3]
     @State private var style: ToneStyle = .binaural
-    @State private var volume: Double = 0.55
+    @State private var volume: Double = 0.385
     @State private var noiseOn = false
     @State private var minutes: Int? = nil
     @State private var selectedProgram: FocusProgram?
@@ -21,7 +21,7 @@ struct ContentView: View {
         let savedPreset = defaults.string(forKey: "preset")
         _selected = State(initialValue: BrainwavePreset.all.first { $0.id == savedPreset } ?? BrainwavePreset.byId("focus"))
         _style = State(initialValue: ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural)
-        _volume = State(initialValue: defaults.object(forKey: "volume") as? Double ?? 0.55)
+        _volume = State(initialValue: defaults.object(forKey: "volume") as? Double ?? 0.385)
         _noiseOn = State(initialValue: defaults.bool(forKey: "noise"))
         let savedMinutes = defaults.integer(forKey: "minutes")
         _minutes = State(initialValue: savedMinutes > 0 ? savedMinutes : nil)
@@ -35,7 +35,8 @@ struct ContentView: View {
             sectionLabel("Focus programs — auto-advancing sequences")
             programRow
 
-            WaveformView(isPlaying: session.isPlaying, isPaused: session.isPaused, beat: selected.beat, color: selected.color)
+            let wavePreset = session.isPlaying ? session.currentPreset : selected
+            WaveformView(isPlaying: session.isPlaying, isPaused: session.isPaused, beat: wavePreset.beat, color: wavePreset.color)
                 .frame(height: 76)
 
             sectionLabel("Presets")
@@ -221,6 +222,8 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
+        .disabled(session.isRunningProgram)
+        .opacity(session.isRunningProgram ? 0.55 : 1)
     }
 
     private var styleRow: some View {

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ServiceManagement
 
 /// Menu bar item so a session keeps running (and can be controlled) after the
@@ -8,6 +9,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let session: SessionController
     private let showWindow: () -> Void
+    private var cancellables = Set<AnyCancellable>()
 
     init(session: SessionController, showWindow: @escaping () -> Void) {
         self.session = session
@@ -18,6 +20,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusItem.button?.image = Self.icon(isPlaying: session.isPlaying, paused: session.isPaused)
         statusItem.button?.toolTip = "NeuraWave"
         statusItem.button?.setAccessibilityLabel("NeuraWave")
+
+        // Keep the menu bar icon in sync with every start/stop/pause/resume,
+        // including state changes initiated from the main window.
+        session.$isPlaying.combineLatest(session.$isPaused)
+            .sink { [weak self] playing, paused in
+                self?.statusItem.button?.image = Self.icon(isPlaying: playing, paused: paused)
+            }
+            .store(in: &cancellables)
 
         let menu = NSMenu()
         menu.delegate = self

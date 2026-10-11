@@ -29,7 +29,7 @@ private final class RealtimeState: @unchecked Sendable {
     }
 
     private let lock = OSAllocatedUnfairLock()
-    private var config = Config(carrier: 240, beat: 10, style: .binaural, volume: 0.55, noiseEnabled: false)
+    private var config = Config(carrier: 240, beat: 10, style: .binaural, volume: 0.385, noiseEnabled: false)
     private var pendingConfig: Config?
     private var running = false
     private var gain: Float = 0

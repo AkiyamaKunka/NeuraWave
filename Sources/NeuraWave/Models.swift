@@ -66,8 +66,19 @@ struct BrainwavePreset: Identifiable, Hashable {
         )
     ]
 
+    /// Non-fatal lookup: an id that no longer exists (corrupted defaults,
+    /// hand-written argument) falls back to a neutral preset instead of
+    /// crashing the app on a force-unwrap.
     static func byId(_ id: String) -> BrainwavePreset {
-        all.first { $0.id == id }!
+        all.first { $0.id == id } ?? BrainwavePreset(
+            id: "unknown",
+            name: "Unknown",
+            band: "—",
+            beat: 10,
+            carrier: 240,
+            detail: "Unrecognized preset",
+            color: .gray
+        )
     }
 }
 
