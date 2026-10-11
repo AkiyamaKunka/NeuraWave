@@ -54,6 +54,10 @@ private final class RealtimeState: @unchecked Sendable {
     private var smoothedNoise: Float = 0
     private var levelsPrimed = false
     private var quickRamp = false
+    /// True while the gain is being dipped to silence for a live switch, so
+    /// the swap is followed by the quick ramp back up. A request applied from
+    /// silence (session start, resume) keeps the slow, gentle fade-in.
+    private var switchDip = false
     private var phaseLeft: Double = 0
     private var phaseRight: Double = 0
     private var envelopePhase: Double = 0
@@ -114,6 +118,7 @@ private final class RealtimeState: @unchecked Sendable {
         lock.withLock {
             gain = 0
             quickRamp = false
+            switchDip = false
         }
     }
 
@@ -147,6 +152,7 @@ private final class RealtimeState: @unchecked Sendable {
             self.levelsPrimed = true
         }
         var quickRamp = self.quickRamp
+        var switchDip = self.switchDip
         var phaseLeft = self.phaseLeft
         var phaseRight = self.phaseRight
         var envelopePhase = self.envelopePhase
@@ -173,13 +179,15 @@ private final class RealtimeState: @unchecked Sendable {
                 phaseLeft = 0
                 phaseRight = 0
                 envelopePhase = 0
-                quickRamp = true
+                quickRamp = switchDip
+                switchDip = false
                 switchesApplied += 1
             }
 
             var target: Float = running ? 1 : 0
             if pending != nil && gain > 0.001 {
                 target = 0
+                switchDip = true
             }
 
             let fadeFrames: Float
@@ -268,6 +276,7 @@ private final class RealtimeState: @unchecked Sendable {
         self.smoothedVolume = smoothedVolume
         self.smoothedNoise = smoothedNoise
         self.quickRamp = quickRamp
+        self.switchDip = switchDip
         self.phaseLeft = phaseLeft
         self.phaseRight = phaseRight
         self.envelopePhase = envelopePhase
@@ -291,6 +300,9 @@ private final class RealtimeState: @unchecked Sendable {
     }
 }
 
+/// Main-thread only (SessionController, menu bar, notifications on .main).
+/// The realtime render path lives in `RealtimeState` and never touches this.
+@MainActor
 final class AudioEngine: ObservableObject {
     @Published private(set) var isPlaying = false
 
@@ -305,7 +317,8 @@ final class AudioEngine: ObservableObject {
     private var isPaused = false
     private var keepAwakeActivity: NSObjectProtocol?
     private var lastConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool)?
-    private var configurationObserver: NSObjectProtocol?
+    // Written once in init, read in the nonisolated deinit.
+    nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
     private var pendingRebuild: DispatchWorkItem?
     /// Output-chain rebuilds after device changes (autotest diagnostics).
     private(set) var deviceRebuilds = 0
@@ -319,7 +332,9 @@ final class AudioEngine: ObservableObject {
             object: engine,
             queue: .main
         ) { [weak self] _ in
-            self?.scheduleRebuildAfterConfigurationChange()
+            MainActor.assumeIsolated {
+                self?.scheduleRebuildAfterConfigurationChange()
+            }
         }
     }
 
@@ -339,14 +354,7 @@ final class AudioEngine: ObservableObject {
                 return false
             }
             state.resetGain()
-            let node = AVAudioSourceNode(format: format) { [state] _, _, frameCount, audioBufferList -> OSStatus in
-                state.render(
-                    buffers: UnsafeMutableAudioBufferListPointer(audioBufferList),
-                    frameCount: Int(frameCount),
-                    sampleRate: sampleRate
-                )
-                return noErr
-            }
+            let node = Self.makeSourceNode(format: format, sampleRate: sampleRate, state: state)
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
             sourceNode = node
@@ -370,6 +378,23 @@ final class AudioEngine: ObservableObject {
         beginKeepAwake()
         isPlaying = true
         return true
+    }
+
+    /// Built outside the main actor on purpose: the render block runs on the
+    /// realtime audio thread and must not inherit main-actor isolation.
+    private nonisolated static func makeSourceNode(
+        format: AVAudioFormat,
+        sampleRate: Double,
+        state: RealtimeState
+    ) -> AVAudioSourceNode {
+        AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList -> OSStatus in
+            state.render(
+                buffers: UnsafeMutableAudioBufferListPointer(audioBufferList),
+                frameCount: Int(frameCount),
+                sampleRate: sampleRate
+            )
+            return noErr
+        }
     }
 
     /// Live parameter change without rebuilding the node: the render thread
@@ -505,10 +530,10 @@ final class AudioEngine: ObservableObject {
     }
 
     deinit {
-        pendingRebuild?.cancel()
+        // AVAudioEngine stops itself when released; only the observer needs
+        // explicit removal. (The app-wide instance lives for the whole run.)
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
         }
-        teardownNode()
     }
 }

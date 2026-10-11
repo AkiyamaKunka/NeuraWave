@@ -74,8 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 forName: NSWindow.willCloseNotification,
                 object: nil,
                 queue: .main
-            ) { note in
-                guard let window = note.object as? NSWindow, window.title == "NeuraWave" else { return }
+            ) { _ in
+                // Any window closing re-checks whether the main window is
+                // still visible (after the close has completed).
                 DispatchQueue.main.async {
                     if !NSApp.windows.contains(where: { $0.title == "NeuraWave" && $0.isVisible }) {
                         NSApp.setActivationPolicy(.accessory)

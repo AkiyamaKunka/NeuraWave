@@ -444,6 +444,16 @@ final class SessionController: ObservableObject {
 
     // MARK: - Automated self-test (launched with --autotest)
 
+    /// Remote commands (AirPods, Control Center, or macOS handing Now Playing
+    /// to another app) arrive asynchronously from outside. During a self-test
+    /// they would make results depend on whatever else the Mac is doing, so
+    /// they are logged and ignored.
+    func shouldHandleRemoteCommand(_ name: String) -> Bool {
+        guard autotestRunning else { return true }
+        logAutoTest("REMOTE_COMMAND_IGNORED \(name)")
+        return false
+    }
+
     func runAutoTest(
         totalSeconds: Int,
         cycleSeconds: Int,

@@ -17,23 +17,38 @@ final class NowPlayingController {
     private init() {
         let center = MPRemoteCommandCenter.shared()
         center.togglePlayPauseCommand.addTarget { _ in
-            Task { @MainActor in SessionController.shared.togglePlayPause() }
+            Task { @MainActor in
+                let session = SessionController.shared
+                if session.shouldHandleRemoteCommand("togglePlayPause") { session.togglePlayPause() }
+            }
             return .success
         }
         center.playCommand.addTarget { _ in
-            Task { @MainActor in SessionController.shared.resumeOrStart() }
+            Task { @MainActor in
+                let session = SessionController.shared
+                if session.shouldHandleRemoteCommand("play") { session.resumeOrStart() }
+            }
             return .success
         }
         center.pauseCommand.addTarget { _ in
-            Task { @MainActor in SessionController.shared.pausePlayback() }
+            Task { @MainActor in
+                let session = SessionController.shared
+                if session.shouldHandleRemoteCommand("pause") { session.pausePlayback() }
+            }
             return .success
         }
         center.nextTrackCommand.addTarget { _ in
-            Task { @MainActor in SessionController.shared.nextPreset() }
+            Task { @MainActor in
+                let session = SessionController.shared
+                if session.shouldHandleRemoteCommand("next") { session.nextPreset() }
+            }
             return .success
         }
         center.previousTrackCommand.addTarget { _ in
-            Task { @MainActor in SessionController.shared.previousPreset() }
+            Task { @MainActor in
+                let session = SessionController.shared
+                if session.shouldHandleRemoteCommand("previous") { session.previousPreset() }
+            }
             return .success
         }
     }
@@ -60,10 +75,15 @@ final class NowPlayingController {
         if let duration, duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = info
+        // macOS reads the play/pause state from playbackState (the rate in
+        // nowPlayingInfo alone isn't enough for Control Center / AirPods).
+        center.playbackState = playing && !paused ? .playing : .paused
     }
 
     func clear() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
     }
 }
