@@ -82,6 +82,18 @@ struct BrainwavePreset: Identifiable, Hashable {
     }
 }
 
+/// Volume range the UI offers; anything else in saved settings (a bad
+/// value, a hand-edited plist) is pulled back into it.
+enum VolumeLevel {
+    static let range: ClosedRange<Double> = 0.05...1.0
+    static let defaultValue = 0.385
+
+    static func sanitized(_ value: Double?) -> Double {
+        guard let value, value.isFinite else { return defaultValue }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+}
+
 /// A timed sequence of presets that auto-advances (click-free crossfade).
 /// Step design follows the evidence in RESEARCH.md: settle-in phases before
 /// demanding work (Garcia-Argibay 2019), alpha gating (Klimesch 2012),

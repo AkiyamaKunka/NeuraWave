@@ -43,4 +43,12 @@ final class ModelsTests: XCTestCase {
             XCTAssertGreaterThan(preset.carrier, preset.beat * 2, "carrier must sit well above the beat")
         }
     }
+
+    func testSavedVolumeIsSanitized() {
+        XCTAssertEqual(VolumeLevel.sanitized(nil), VolumeLevel.defaultValue)
+        XCTAssertEqual(VolumeLevel.sanitized(.nan), VolumeLevel.defaultValue)
+        XCTAssertEqual(VolumeLevel.sanitized(5), 1)
+        XCTAssertEqual(VolumeLevel.sanitized(-1), 0.05)
+        XCTAssertEqual(VolumeLevel.sanitized(0.5), 0.5)
+    }
 }

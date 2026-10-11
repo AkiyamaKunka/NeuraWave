@@ -4,7 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var selected = BrainwavePreset.all[3]
     @State private var style: ToneStyle = .binaural
-    @State private var volume: Double = 0.385
+    @State private var volume: Double = VolumeLevel.defaultValue
     @State private var noiseOn = false
     @State private var minutes: Int? = nil
     @State private var selectedProgram: FocusProgram?
@@ -21,7 +21,7 @@ struct ContentView: View {
         let savedPreset = defaults.string(forKey: "preset")
         _selected = State(initialValue: BrainwavePreset.all.first { $0.id == savedPreset } ?? BrainwavePreset.byId("focus"))
         _style = State(initialValue: ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural)
-        _volume = State(initialValue: defaults.object(forKey: "volume") as? Double ?? 0.385)
+        _volume = State(initialValue: VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double))
         _noiseOn = State(initialValue: defaults.bool(forKey: "noise"))
         let savedMinutes = defaults.integer(forKey: "minutes")
         _minutes = State(initialValue: savedMinutes > 0 ? savedMinutes : nil)
@@ -284,7 +284,7 @@ struct ContentView: View {
         HStack(spacing: 10) {
             Image(systemName: "speaker.fill")
                 .foregroundStyle(.secondary)
-            Slider(value: $volume, in: 0.05...1.0)
+            Slider(value: $volume, in: VolumeLevel.range)
                 .accessibilityLabel("Volume")
             Image(systemName: "speaker.wave.3.fill")
                 .foregroundStyle(.secondary)

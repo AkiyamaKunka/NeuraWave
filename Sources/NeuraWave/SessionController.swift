@@ -143,7 +143,7 @@ final class SessionController: ObservableObject {
     private func startFromSavedSettings() {
         let defaults = UserDefaults.standard
         let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
-        let volume = defaults.object(forKey: "volume") as? Double ?? 0.385
+        let volume = VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double)
         let noise = defaults.bool(forKey: "noise")
         if let program = FocusProgram.all.first(where: { $0.id == defaults.string(forKey: "program") }) {
             startProgram(program, style: style, volume: volume, withNoise: noise)
