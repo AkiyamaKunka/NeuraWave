@@ -82,6 +82,14 @@ bash scripts/package-app.sh release  # assembles build/NeuraWave.app
 
 ## 🧪 Testing
 
+Unit tests cover the realtime render path (fades, click-free switching,
+bounded output for every preset, and a concurrent-render race test) and the
+program schedule:
+
+```bash
+swift test
+```
+
 A hidden self-test mode exercises every preset, tone style, noise setting,
 volume change, timer, and stop/restart path:
 
@@ -100,7 +108,7 @@ scenario on any mismatch or failed in-run check. Extra probes:
 `--autotest-device-change-at N` (simulated output-device switch) and
 `--autotest-window-check` (close and reopen the window; needs an awake display).
 
-CI on GitHub Actions runs the smoke, stop/restart, program-advance,
+CI on GitHub Actions runs the unit tests plus the smoke, stop/restart, program-advance,
 switch-stress, pause/resume and device-change scenarios on a clean macOS runner
 for every push.
 
