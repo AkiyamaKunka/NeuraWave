@@ -160,6 +160,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
+                .accessibilityAddTraits(isOn ? .isSelected : [])
                 .disabled(session.isPlaying)
                 .opacity(session.isPlaying ? 0.55 : 1)
             }
@@ -233,6 +234,7 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .disabled(session.isRunningProgram)
         .opacity(session.isRunningProgram ? 0.55 : 1)
     }
