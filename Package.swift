@@ -10,6 +10,12 @@ let package = Package(
             path: "Sources/NeuraWave",
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [.linkedFramework("MediaPlayer")]
+        ),
+        .testTarget(
+            name: "NeuraWaveTests",
+            dependencies: ["NeuraWave"],
+            path: "Tests/NeuraWaveTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
 )

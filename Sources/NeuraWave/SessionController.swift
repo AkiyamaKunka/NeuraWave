@@ -305,15 +305,7 @@ final class SessionController: ObservableObject {
             stop() // fade out; stop() also clears the program state
             return
         }
-        var acc: TimeInterval = 0
-        var index = 0
-        for (i, step) in program.steps.enumerated() {
-            if elapsed < acc + step.seconds {
-                index = i
-                break
-            }
-            acc += step.seconds
-        }
+        let index = program.stepIndex(at: elapsed)
         if index != programStep?.index {
             programStep = (index, program.steps.count)
             programTitle = programTitleString(program, index: index)

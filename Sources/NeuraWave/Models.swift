@@ -99,6 +99,19 @@ struct FocusProgram: Identifiable, Hashable {
 
     var totalSeconds: TimeInterval { steps.reduce(0) { $0 + $1.seconds } }
 
+    /// Index of the step playing `elapsed` seconds into the program (the last
+    /// step once the schedule is over; negative time counts as the start).
+    func stepIndex(at elapsed: TimeInterval) -> Int {
+        var end: TimeInterval = 0
+        for (index, step) in steps.enumerated() {
+            end += step.seconds
+            if elapsed < end {
+                return index
+            }
+        }
+        return max(0, steps.count - 1)
+    }
+
     static let all: [FocusProgram] = [
         FocusProgram(
             id: "study",

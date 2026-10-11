@@ -28,7 +28,7 @@ enum ToneStyle: String, CaseIterable, Identifiable {
 ///   and the counters; the main thread only reads them.
 /// The render callback therefore never writes back a field another thread may
 /// have changed while it was rendering.
-private final class RealtimeState: @unchecked Sendable {
+final class RealtimeState: @unchecked Sendable {
     private struct ToneConfig {
         var carrier: Double
         var beat: Double

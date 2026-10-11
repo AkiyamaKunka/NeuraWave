@@ -13,6 +13,9 @@ jobs:
       - name: Build
         run: swift build
 
+      - name: Unit tests (render path, lost-update race, program schedule)
+        run: swift test
+
       - name: Smoke autotest (8s, crossfade switches)
         run: .build/debug/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2 | tee /tmp/smoke.log && grep -q AUTOTEST_COMPLETE /tmp/smoke.log && grep -q 'SWITCH_CHECK ok' /tmp/smoke.log
 
