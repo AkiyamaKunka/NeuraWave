@@ -30,3 +30,6 @@ jobs:
 
       - name: Quick pause/resume autotest (resume mid-fade, no rebuild)
         run: .build/debug/NeuraWave --autotest --autotest-seconds 12 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 6 | tee /tmp/qpause.log && grep -q AUTOTEST_RESUME /tmp/qpause.log && grep -q 'SWITCH_CHECK ok' /tmp/qpause.log
+
+      - name: Device-change autotest (simulated output switch, one coalesced rebuild)
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 14 --autotest-cycle 50 --autotest-device-change-at 4 | tee /tmp/device.log && grep -q 'DEVICE_CHECK ok' /tmp/device.log && grep -q 'SWITCH_CHECK ok' /tmp/device.log

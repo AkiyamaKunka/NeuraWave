@@ -310,12 +310,14 @@ struct ContentView: View {
                     Button("No timer") {
                         minutes = nil
                         UserDefaults.standard.set(0, forKey: "minutes")
+                        session.updateTimer(minutes: nil)
                     }
                     Divider()
                     ForEach(durations, id: \.self) { duration in
                         Button("\(duration) minutes") {
                             minutes = duration
                             UserDefaults.standard.set(duration, forKey: "minutes")
+                            session.updateTimer(minutes: duration)
                         }
                     }
                 } label: {

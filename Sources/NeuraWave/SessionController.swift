@@ -53,6 +53,8 @@ final class SessionController: ObservableObject {
     private var autotestPausePerformed = false
     private var autotestResumePerformed = false
     private var autotestArguments: [String] = []
+    private var autotestDeviceChangeAt = 0
+    private var autotestDeviceChangePerformed = false
 
     private struct AutoTestConfig {
         let preset: BrainwavePreset
@@ -195,7 +197,36 @@ final class SessionController: ObservableObject {
         engine.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
         lastStartConfig = (preset, style, volume, withNoise, lastStartConfig?.minutes)
         currentPreset = preset
-        sessionTitle = preset.name
+        if program == nil {
+            // During a program the title stays "Program · Step".
+            sessionTitle = preset.name
+        }
+        pushNowPlaying()
+    }
+
+    /// Timer picked or changed while a single-preset session plays: apply it
+    /// now (counted from this moment) instead of silently waiting for the
+    /// next Start. Programs have their own schedule and ignore this.
+    func updateTimer(minutes: Int?) {
+        guard isPlaying, program == nil, let cfg = lastStartConfig else { return }
+        lastStartConfig = (cfg.preset, cfg.style, cfg.volume, cfg.withNoise, minutes)
+        if let minutes {
+            if isPaused {
+                pausedRemaining = Double(minutes) * 60
+                endDate = nil
+            } else {
+                endDate = Date().addingTimeInterval(Double(minutes) * 60)
+            }
+            remainingSeconds = minutes * 60
+            scheduleCountdown()
+        } else {
+            endDate = nil
+            pausedRemaining = nil
+            remainingSeconds = nil
+            timer?.invalidate()
+            timer = nil
+        }
+        lastPushedSecond = -1
         pushNowPlaying()
     }
 
@@ -441,6 +472,8 @@ final class SessionController: ObservableObject {
         autotestResumeAt = intArgument(arguments, name: "--autotest-resume-at", fallback: 0)
         autotestPausePerformed = false
         autotestResumePerformed = false
+        autotestDeviceChangeAt = intArgument(arguments, name: "--autotest-device-change-at", fallback: 0)
+        autotestDeviceChangePerformed = false
 
         let first = Self.autotestConfigs[0]
         if autotestProgram {
@@ -534,6 +567,20 @@ final class SessionController: ObservableObject {
             autotestResumePerformed = true
             resumePlayback()
             logAutoTest("AUTOTEST_RESUME at \(Int(elapsed))s -> \(autotestSnapshot())")
+        }
+
+        if autotestDeviceChangeAt > 0, !autotestDeviceChangePerformed, Int(elapsed) >= autotestDeviceChangeAt, isPlaying {
+            autotestDeviceChangePerformed = true
+            // A burst, like a real device switch: must coalesce to one rebuild.
+            engine.simulateConfigurationChange()
+            engine.simulateConfigurationChange()
+            engine.simulateConfigurationChange()
+            logAutoTest("AUTOTEST_DEVICE_CHANGE at \(Int(elapsed))s -> \(autotestSnapshot())")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+                guard let self else { return }
+                let ok = self.isPlaying && self.engine.deviceRebuilds == 1 && self.engine.diagnostics.gain > 0.9
+                self.logAutoTest("DEVICE_CHECK \(ok ? "ok" : "FAIL") rebuilds=\(self.engine.deviceRebuilds) -> \(self.autotestSnapshot())")
+            }
         }
 
         if elapsed >= Double(autotestTotal) {

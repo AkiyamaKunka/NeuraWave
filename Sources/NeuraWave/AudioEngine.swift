@@ -297,6 +297,9 @@ final class AudioEngine: ObservableObject {
     private var keepAwakeActivity: NSObjectProtocol?
     private var lastConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool)?
     private var configurationObserver: NSObjectProtocol?
+    private var pendingRebuild: DispatchWorkItem?
+    /// Output-chain rebuilds after device changes (autotest diagnostics).
+    private(set) var deviceRebuilds = 0
 
     init() {
         // Output device / sample-rate changes (AirPods connecting, headphones
@@ -307,7 +310,7 @@ final class AudioEngine: ObservableObject {
             object: engine,
             queue: .main
         ) { [weak self] _ in
-            self?.handleConfigurationChange()
+            self?.scheduleRebuildAfterConfigurationChange()
         }
     }
 
@@ -434,10 +437,28 @@ final class AudioEngine: ObservableObject {
         state.requests()
     }
 
+    /// A device switch usually fires several notifications in a row (and our
+    /// own rebuild may add one); coalesce them into a single rebuild.
+    private func scheduleRebuildAfterConfigurationChange() {
+        pendingRebuild?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingRebuild = nil
+            self?.handleConfigurationChange()
+        }
+        pendingRebuild = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    /// Autotest hook: behave exactly as if the output device had changed.
+    func simulateConfigurationChange() {
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine)
+    }
+
     private func handleConfigurationChange() {
         // Only an active session needs the chain back. A paused one is rebuilt
         // on resume anyway; idle has nothing to restore.
         guard isPlaying, !isPaused, sourceNode != nil, let cfg = lastConfig else { return }
+        deviceRebuilds += 1
         teardownNode()
         if !start(preset: cfg.preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.noiseEnabled) {
             isPlaying = false
@@ -473,6 +494,7 @@ final class AudioEngine: ObservableObject {
     }
 
     deinit {
+        pendingRebuild?.cancel()
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
         }
