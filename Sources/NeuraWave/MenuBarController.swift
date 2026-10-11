@@ -127,7 +127,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func quitApp() {
-        session.stop()
+        // AppDelegate fades out and stops the session before terminating.
         NSApp.terminate(nil)
     }
 

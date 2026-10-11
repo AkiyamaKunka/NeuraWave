@@ -128,6 +128,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Quitting mid-session (⌘Q, menu bar Quit) would cut the tone off
+    /// mid-cycle — an audible click. Glide the level to zero first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let session = SessionController.shared
+        guard session.engine.isPlaying else { return .terminateNow }
+        session.engine.update(volume: 0, noiseEnabled: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            session.stop()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // Closing the window must not stop a running session: keep playing and
         // stay controllable from the menu bar (or the dock icon).
