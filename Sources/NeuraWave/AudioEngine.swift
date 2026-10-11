@@ -42,6 +42,9 @@ private final class RealtimeState: @unchecked Sendable {
     private var volume: Float = 0.385
     private var noiseEnabled = false
     private var requestCount: UInt64 = 0
+    /// Requests superseded by a newer one before the render thread applied
+    /// them (two changes within one crossfade dip). Intentional, not lost.
+    private var coalescedCount: UInt64 = 0
     // Render-thread owned.
     private var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
     private var gain: Float = 0
@@ -84,6 +87,9 @@ private final class RealtimeState: @unchecked Sendable {
     /// rebuild, no click.
     func configure(preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool) {
         lock.withLock {
+            if pendingTone != nil {
+                coalescedCount += 1
+            }
             pendingTone = ToneConfig(carrier: preset.carrier, beat: preset.beat, style: style)
             requestCount += 1
             self.volume = volume
@@ -251,9 +257,12 @@ private final class RealtimeState: @unchecked Sendable {
         lock.lock()
         self.tone = tone
         if self.pendingTone == nil {
-            // Still mid-dip: keep the request for the next buffer. A request
-            // that arrived during this render is newer and wins.
+            // Still mid-dip: keep the request for the next buffer.
             self.pendingTone = pending
+        } else if pending != nil {
+            // A request that arrived during this render is newer and wins;
+            // the one this render was still holding is superseded.
+            self.coalescedCount += 1
         }
         self.gain = gain
         self.smoothedVolume = smoothedVolume
@@ -271,8 +280,8 @@ private final class RealtimeState: @unchecked Sendable {
 
     /// Configuration requests made so far (autotest compares this with the
     /// number of switches the render thread actually applied).
-    func requests() -> UInt64 {
-        lock.withLock { requestCount }
+    func requests() -> (requested: UInt64, coalesced: UInt64) {
+        lock.withLock { (requestCount, coalescedCount) }
     }
 
     func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
@@ -433,7 +442,9 @@ final class AudioEngine: ObservableObject {
         state.diagnostics()
     }
 
-    var switchRequests: UInt64 {
+    /// Every request is either applied by the render thread or superseded by
+    /// a newer one before it could be; anything else was lost.
+    var switchRequests: (requested: UInt64, coalesced: UInt64) {
         state.requests()
     }
 

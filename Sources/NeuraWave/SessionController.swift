@@ -592,9 +592,10 @@ final class SessionController: ObservableObject {
                 // Every requested preset/style change must reach the render
                 // thread (a lost update here once dropped ~30% of switches).
                 if let self {
-                    let requested = self.engine.switchRequests
+                    let (requested, coalesced) = self.engine.switchRequests
                     let applied = self.engine.diagnostics.switches
-                    self.logAutoTest("SWITCH_CHECK \(requested == applied ? "ok" : "MISMATCH") requested=\(requested) applied=\(applied)")
+                    let ok = requested == applied + coalesced
+                    self.logAutoTest("SWITCH_CHECK \(ok ? "ok" : "MISMATCH") requested=\(requested) applied=\(applied) coalesced=\(coalesced)")
                 }
                 exit(0)
             }
