@@ -7,8 +7,11 @@ struct NeuraWaveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("NeuraWave") {
+        // A single-instance Window (not a WindowGroup): "Show Window" can
+        // always bring back the one main window, even after it was closed.
+        Window("NeuraWave", id: AppDelegate.mainWindowID) {
             ContentView()
+                .modifier(OpenWindowBridge())
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
@@ -17,6 +20,11 @@ struct NeuraWaveApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static let mainWindowID = "main"
+    /// SwiftUI's openWindow action, captured from the view tree so AppKit
+    /// code (menu bar, Dock reopen) can recreate a closed window.
+    static var openMainWindow: (() -> Void)?
+
     private var menuBar: MenuBarController?
     private var launchedAtLogin = false
 
@@ -94,6 +102,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 programSeconds: programSeconds,
                 arguments: arguments
             )
+            if arguments.contains("--autotest-window-check") {
+                Self.runWindowCheck()
+            }
+        }
+    }
+
+    /// Autotest: close the main window, then "Show Window" must bring it back.
+    /// Needs a logged-in, awake display; otherwise no window is ever shown.
+    private static func runWindowCheck() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            let mainWindows = NSApp.windows.filter { $0.title == "NeuraWave" && $0.isVisible }
+            guard !mainWindows.isEmpty else {
+                print("WINDOW_CHECK skipped (no window presented; display asleep or locked?)")
+                return
+            }
+            mainWindows.forEach { $0.performClose(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                showWindow()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let visible = NSApp.windows.contains { $0.title == "NeuraWave" && $0.isVisible }
+                print("WINDOW_CHECK \(visible ? "ok" : "FAIL")")
+            }
         }
     }
 
@@ -115,6 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
             return
         }
+        // The window was closed and released: ask SwiftUI for a new one.
+        openMainWindow?()
     }
 
     /// Default-on launch-at-login, applied once on first run. After that the
@@ -180,5 +213,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return arguments[index + 1]
         }
         return nil
+    }
+}
+
+/// Hands SwiftUI's openWindow action to AppDelegate once the view exists.
+private struct OpenWindowBridge: ViewModifier {
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            AppDelegate.openMainWindow = { openWindow(id: AppDelegate.mainWindowID) }
+        }
     }
 }

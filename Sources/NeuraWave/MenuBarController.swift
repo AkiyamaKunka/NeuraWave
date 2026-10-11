@@ -63,6 +63,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         status.target = self
         menu.addItem(status)
 
+        if session.isPlaying, session.programTitle == nil {
+            let now = NSMenuItem(title: session.displayTitle, action: nil, keyEquivalent: "")
+            now.isEnabled = false
+            menu.addItem(now)
+        }
+
         if session.isPlaying, let remaining = session.remainingSeconds {
             let countdown = NSMenuItem(title: "Remaining \(Self.format(remaining))", action: nil, keyEquivalent: "")
             countdown.isEnabled = false
@@ -73,6 +79,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let prog = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             prog.isEnabled = false
             menu.addItem(prog)
+        }
+
+        if session.isPlaying {
+            let stop = NSMenuItem(title: "Stop", action: #selector(stopPlayback), keyEquivalent: "")
+            stop.target = self
+            menu.addItem(stop)
         }
 
         menu.addItem(.separator())
@@ -90,7 +102,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func togglePlayback() {
         session.togglePlayPause()
-        statusItem.button?.image = Self.icon(isPlaying: session.isPlaying, paused: session.isPaused)
+    }
+
+    @objc private func stopPlayback() {
+        session.stop()
     }
 
     @objc private func openWindow() {

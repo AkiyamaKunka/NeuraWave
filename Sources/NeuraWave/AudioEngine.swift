@@ -45,6 +45,11 @@ private final class RealtimeState: @unchecked Sendable {
     // Render-thread owned.
     private var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
     private var gain: Float = 0
+    /// Per-sample smoothed levels, so dragging the volume slider or toggling
+    /// noise glides instead of stepping (no zipper noise / clicks).
+    private var smoothedVolume: Float = 0.385
+    private var smoothedNoise: Float = 0
+    private var levelsPrimed = false
     private var quickRamp = false
     private var phaseLeft: Double = 0
     private var phaseRight: Double = 0
@@ -127,6 +132,14 @@ private final class RealtimeState: @unchecked Sendable {
         let volume = self.volume
         let noiseEnabled = self.noiseEnabled
         var gain = self.gain
+        var smoothedVolume = self.smoothedVolume
+        var smoothedNoise = self.smoothedNoise
+        if !self.levelsPrimed {
+            // First buffer ever: start at the requested level, don't glide in.
+            smoothedVolume = volume
+            smoothedNoise = noiseEnabled ? 1 : 0
+            self.levelsPrimed = true
+        }
         var quickRamp = self.quickRamp
         var phaseLeft = self.phaseLeft
         var phaseRight = self.phaseRight
@@ -138,6 +151,9 @@ private final class RealtimeState: @unchecked Sendable {
         let quickDownFrames = Float(sampleRate * crossfadeDownSeconds)
         let quickUpFrames = Float(sampleRate * crossfadeUpSeconds)
         let rowCount = Self.noiseRowCount
+        // ~25 ms one-pole glide toward the requested levels.
+        let smoothing = Float(1 - exp(-1 / (sampleRate * 0.025)))
+        let noiseTarget: Float = noiseEnabled ? 1 : 0
         var nanCount = 0
         var clipCount = 0
         var switchesApplied = 0
@@ -189,14 +205,16 @@ private final class RealtimeState: @unchecked Sendable {
                 envelope = 1
             }
 
-            let toneLevel = 0.36 * volume
-            let noiseLevel = 0.10 * volume * (noiseEnabled ? 1 : 0)
+            smoothedVolume += (volume - smoothedVolume) * smoothing
+            smoothedNoise += (noiseTarget - smoothedNoise) * smoothing
+            let toneLevel = 0.36 * smoothedVolume
+            let noiseLevel = 0.10 * smoothedVolume * smoothedNoise
             let toneSample = toneLevel * envelope * gain
             let leftSample = Float(sin(phaseLeft)) * toneSample
             let rightSample = Float(sin(phaseRight)) * toneSample
 
             var noise: Float = 0
-            if noiseEnabled {
+            if smoothedNoise > 0.0001 {
                 // xorshift32: allocation- and syscall-free, fine for noise.
                 rngState ^= rngState << 13
                 rngState ^= rngState >> 17
@@ -238,6 +256,8 @@ private final class RealtimeState: @unchecked Sendable {
             self.pendingTone = pending
         }
         self.gain = gain
+        self.smoothedVolume = smoothedVolume
+        self.smoothedNoise = smoothedNoise
         self.quickRamp = quickRamp
         self.phaseLeft = phaseLeft
         self.phaseRight = phaseRight
@@ -390,6 +410,17 @@ final class AudioEngine: ObservableObject {
     /// when the output can't be started (e.g. the device went away).
     @discardableResult
     func restartAfterPause() -> Bool {
+        if sourceNode != nil, engine.isRunning {
+            // Resumed before the pause released the chain (and the device is
+            // still there): just ramp back up from wherever the fade-out got
+            // to. Tearing down mid-fade would cut the signal — a click.
+            stopGeneration += 1 // cancels the pending pause teardown
+            isPaused = false
+            state.setRunning(true)
+            beginKeepAwake()
+            isPlaying = true
+            return true
+        }
         teardownNode()
         guard let cfg = lastConfig else { return false }
         return start(preset: cfg.preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.noiseEnabled)

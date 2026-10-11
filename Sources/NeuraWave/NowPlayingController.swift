@@ -31,6 +31,14 @@ final class NowPlayingController {
         }
     }
 
+    /// Programs own their preset sequence, so AirPods double-press skipping
+    /// is turned off while one runs.
+    func setSkipEnabled(_ enabled: Bool) {
+        let center = MPRemoteCommandCenter.shared()
+        center.nextTrackCommand.isEnabled = enabled
+        center.previousTrackCommand.isEnabled = enabled
+    }
+
     func update(title: String, elapsed: TimeInterval, duration: TimeInterval?, playing: Bool, paused: Bool) {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,

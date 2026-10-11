@@ -27,3 +27,6 @@ jobs:
 
       - name: Pause/resume autotest (pause 5s-12s)
         run: .build/debug/NeuraWave --autotest --autotest-seconds 20 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 12 | tee /tmp/pause.log && grep -q AUTOTEST_RESUME /tmp/pause.log && grep -q 'SWITCH_CHECK ok' /tmp/pause.log
+
+      - name: Quick pause/resume autotest (resume mid-fade, no rebuild)
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 12 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 6 | tee /tmp/qpause.log && grep -q AUTOTEST_RESUME /tmp/qpause.log && grep -q 'SWITCH_CHECK ok' /tmp/qpause.log

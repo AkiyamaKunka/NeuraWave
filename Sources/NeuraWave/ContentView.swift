@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var noiseOn = false
     @State private var minutes: Int? = nil
     @State private var selectedProgram: FocusProgram?
-    @StateObject private var session = SessionController.shared
+    @ObservedObject private var session = SessionController.shared
 
     private let columns = [
         GridItem(.flexible(), spacing: 8),
@@ -343,10 +343,27 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if session.isPlaying {
+                // Pause/Resume sits beside Stop, so a paused session can
+                // still be stopped from the window.
+                Button {
+                    session.togglePlayPause()
+                } label: {
+                    Image(systemName: session.isPaused ? "play.fill" : "pause.fill")
+                        .font(.headline)
+                        .frame(width: 18)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color(nsColor: .quaternarySystemFill)))
+                }
+                .buttonStyle(.plain)
+                .help(session.isPaused ? "Resume" : "Pause")
+                .accessibilityLabel(session.isPaused ? "Resume" : "Pause")
+                .keyboardShortcut(.space, modifiers: [])
+            }
+
             Button {
-                if session.isPlaying && session.isPaused {
-                    session.resumePlayback()
-                } else if session.isPlaying {
+                if session.isPlaying {
                     session.stop()
                 } else if let program = selectedProgram {
                     session.startProgram(program, style: style, volume: volume, withNoise: noiseOn)
@@ -361,8 +378,8 @@ struct ContentView: View {
                 }
             } label: {
                 Label(
-                    session.isPlaying ? (session.isPaused ? "Resume" : "Stop") : "Start",
-                    systemImage: session.isPlaying ? (session.isPaused ? "play.fill" : "stop.fill") : "play.fill"
+                    session.isPlaying ? "Stop" : "Start",
+                    systemImage: session.isPlaying ? "stop.fill" : "play.fill"
                 )
                 .font(.headline)
                 .padding(.horizontal, 20)

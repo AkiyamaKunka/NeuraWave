@@ -15,6 +15,8 @@ final class SessionController: ObservableObject {
     @Published private(set) var programTitle: String?
     @Published private(set) var programStep: (index: Int, count: Int)?
     @Published private(set) var isRunningProgram = false
+    /// What the session is called right now (preset, or program · step).
+    var displayTitle: String { sessionTitle }
     @Published private(set) var currentPreset: BrainwavePreset = BrainwavePreset.byId("focus")
 
     let engine = AudioEngine()
@@ -128,10 +130,26 @@ final class SessionController: ObservableObject {
             return
         }
         guard let last = lastStartConfig else {
-            start(preset: BrainwavePreset.byId("focus"), style: .binaural, volume: 0.385, withNoise: false, minutes: nil)
+            startFromSavedSettings()
             return
         }
         start(preset: last.preset, style: last.style, volume: last.volume, withNoise: last.withNoise, minutes: last.minutes)
+    }
+
+    /// Nothing played yet this launch (e.g. started at login, menu bar only):
+    /// use the choices saved by the window instead of hard-coded defaults.
+    private func startFromSavedSettings() {
+        let defaults = UserDefaults.standard
+        let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
+        let volume = defaults.object(forKey: "volume") as? Double ?? 0.385
+        let noise = defaults.bool(forKey: "noise")
+        if let program = FocusProgram.all.first(where: { $0.id == defaults.string(forKey: "program") }) {
+            startProgram(program, style: style, volume: volume, withNoise: noise)
+            return
+        }
+        let preset = BrainwavePreset.all.first { $0.id == defaults.string(forKey: "preset") } ?? BrainwavePreset.byId("focus")
+        let minutes = defaults.integer(forKey: "minutes")
+        start(preset: preset, style: style, volume: volume, withNoise: noise, minutes: minutes > 0 ? minutes : nil)
     }
 
     /// Runs a timed program: presets auto-advance through the click-free
@@ -149,6 +167,7 @@ final class SessionController: ObservableObject {
         lastError = nil
         resetPauseBookkeeping()
         isRunningProgram = true
+        nowPlaying.setSkipEnabled(false)
         currentPreset = first
         self.program = program
         programStartedAt = Date()
@@ -201,6 +220,7 @@ final class SessionController: ObservableObject {
         isPaused = false
         isRunningProgram = false
         resetPauseBookkeeping()
+        nowPlaying.setSkipEnabled(true)
         nowPlaying.clear()
     }
 
