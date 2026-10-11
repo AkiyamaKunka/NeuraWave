@@ -25,7 +25,7 @@ final class SessionController: ObservableObject {
     private var lastStartConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?)?
     /// Pause bookkeeping: pausing freezes the countdown (timer and program),
     /// resuming resumes it — a paused session never expires underneath you.
-    private var pausedRemainingSeconds: Int?
+    private var pausedRemaining: TimeInterval?
     private var programPausedAt: Date?
     private var programPauseTotal: TimeInterval = 0
     /// Whole-second throttle for Now Playing metadata pushes.
@@ -58,6 +58,20 @@ final class SessionController: ObservableObject {
         let noise: Bool
     }
 
+    private static let audioFailureMessage = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
+
+    init() {
+        // The output device went away (or changed) and couldn't be restarted:
+        // stop rather than claim to be playing silence.
+        engine.onOutputFailure = { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.isPlaying else { return }
+                self.stop()
+                self.lastError = Self.audioFailureMessage
+            }
+        }
+    }
+
     private static let autotestConfigs: [AutoTestConfig] = {
         var configs: [AutoTestConfig] = []
         for style in ToneStyle.allCases {
@@ -77,9 +91,12 @@ final class SessionController: ObservableObject {
         minutes: Int?
     ) {
         stop()
+        // A single-preset session replaces any earlier program as "the last
+        // thing played", so the menu bar / AirPods restart this, not that.
+        lastProgram = nil
         lastStartConfig = (preset, style, volume, withNoise, minutes)
         guard engine.start(preset: preset, style: style, volume: Float(volume), withNoise: withNoise) else {
-            lastError = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
+            lastError = Self.audioFailureMessage
             return
         }
         isPlaying = engine.isPlaying
@@ -125,7 +142,7 @@ final class SessionController: ObservableObject {
         let first = program.steps[0].preset
         lastStartConfig = (first, style, volume, withNoise, nil)
         guard engine.start(preset: first, style: style, volume: Float(volume), withNoise: withNoise) else {
-            lastError = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
+            lastError = Self.audioFailureMessage
             return
         }
         isPlaying = true
@@ -192,7 +209,7 @@ final class SessionController: ObservableObject {
     }
 
     private func resetPauseBookkeeping() {
-        pausedRemainingSeconds = nil
+        pausedRemaining = nil
         programPausedAt = nil
         programPauseTotal = 0
         lastPushedSecond = -1
@@ -232,7 +249,7 @@ final class SessionController: ObservableObject {
 
     private func tickProgram(_ program: FocusProgram) {
         guard !isPaused else { return } // paused programs freeze in place
-        let elapsed = Date().timeIntervalSince(programStartedAt) - programPauseTotal
+        let elapsed = programElapsed()
         if elapsed >= program.totalSeconds {
             stop() // fade out; stop() also clears the program state
             return
@@ -268,15 +285,25 @@ final class SessionController: ObservableObject {
         }
     }
 
+    /// Program time actually played: wall time since start minus every pause,
+    /// including the one in progress.
+    private func programElapsed(now: Date = Date()) -> TimeInterval {
+        var paused = programPauseTotal
+        if let pausedAt = programPausedAt {
+            paused += now.timeIntervalSince(pausedAt)
+        }
+        return max(0, now.timeIntervalSince(programStartedAt) - paused)
+    }
+
     // MARK: - Playback control (AirPods / Now Playing / menu bar)
 
     func pausePlayback() {
         guard isPlaying, !isPaused else { return }
         isPaused = true
-        if endDate != nil {
+        if let end = endDate {
             // Freeze the countdown: the deadline is parked while paused and
             // reinstated with the same remaining time on resume.
-            pausedRemainingSeconds = Int(ceil(endDate!.timeIntervalSinceNow))
+            pausedRemaining = max(0, end.timeIntervalSinceNow)
             endDate = nil
         }
         if program != nil {
@@ -289,15 +316,19 @@ final class SessionController: ObservableObject {
     func resumePlayback() {
         guard isPlaying, isPaused else { return }
         isPaused = false
-        if let frozen = pausedRemainingSeconds {
-            endDate = Date().addingTimeInterval(Double(frozen))
-            pausedRemainingSeconds = nil
+        if let frozen = pausedRemaining {
+            endDate = Date().addingTimeInterval(frozen)
+            pausedRemaining = nil
         }
         if let pausedAt = programPausedAt {
             programPauseTotal += Date().timeIntervalSince(pausedAt)
             programPausedAt = nil
         }
-        engine.restartAfterPause()
+        guard engine.restartAfterPause() else {
+            stop()
+            lastError = Self.audioFailureMessage
+            return
+        }
         pushNowPlaying()
         // Some macOS versions re-sync Now Playing state shortly after a rate
         // change; re-push once the fade-in is underway.
@@ -336,7 +367,9 @@ final class SessionController: ObservableObject {
     }
 
     private func stepPreset(by delta: Int) {
-        guard isPlaying, let cfg = lastStartConfig else { return }
+        // A running program owns the preset sequence; skipping would fight
+        // its schedule (and be undone at the next step).
+        guard isPlaying, program == nil, let cfg = lastStartConfig else { return }
         let all = BrainwavePreset.all
         guard let currentIndex = all.firstIndex(where: { $0.id == cfg.preset.id }) else { return }
         let nextIndex = (currentIndex + delta + all.count) % all.count
@@ -349,7 +382,7 @@ final class SessionController: ObservableObject {
         var duration: TimeInterval?
         if let program {
             duration = program.totalSeconds
-            elapsed = min(Date().timeIntervalSince(programStartedAt), program.totalSeconds)
+            elapsed = min(programElapsed(), program.totalSeconds)
         } else if let minutes = lastStartConfig?.minutes {
             let total = Double(minutes * 60)
             duration = total
@@ -488,7 +521,14 @@ final class SessionController: ObservableObject {
             autotestTimer = nil
             stop()
             logAutoTest("AUTOTEST_COMPLETE total=\(Int(elapsed))s -> \(autotestSnapshot())")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                // Every requested preset/style change must reach the render
+                // thread (a lost update here once dropped ~30% of switches).
+                if let self {
+                    let requested = self.engine.switchRequests
+                    let applied = self.engine.diagnostics.switches
+                    self.logAutoTest("SWITCH_CHECK \(requested == applied ? "ok" : "MISMATCH") requested=\(requested) applied=\(applied)")
+                }
                 exit(0)
             }
         }

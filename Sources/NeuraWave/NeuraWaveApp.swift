@@ -18,21 +18,42 @@ struct NeuraWaveApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController?
+    private var launchedAtLogin = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // The launch Apple event is only "current" this early.
+        launchedAtLogin = Self.wasLaunchedAsLoginItem()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        menuBar = MenuBarController(session: SessionController.shared, showWindow: { Self.showWindow() })
-
         let arguments = ProcessInfo.processInfo.arguments
+        let isAutotest = arguments.contains("--autotest")
+        let launchedAtLogin = !isAutotest && self.launchedAtLogin
+
+        if launchedAtLogin {
+            // Login launch: menu bar only, no window, no focus stealing.
+            NSApp.setActivationPolicy(.accessory)
+            // orderOut (not close) keeps the window alive so "Show Window"
+            // can bring it straight back. SwiftUI may present it a beat
+            // after launch, so hide on the next turn and once more after.
+            let hide: @MainActor @Sendable () -> Void = {
+                for window in NSApp.windows where window.title == "NeuraWave" {
+                    window.orderOut(nil)
+                }
+            }
+            DispatchQueue.main.async(execute: hide)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: hide)
+        } else {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        menuBar = MenuBarController(session: SessionController.shared, showWindow: { Self.showWindow() })
 
         // Headless screenshot rendering for docs (--screenshot <path>):
         // renders the real UI at 2x scale for a crisp README image.
         if let idx = arguments.firstIndex(of: "--screenshot"), idx + 1 < arguments.count {
             Self.renderScreenshot(to: arguments[idx + 1])
         }
-
-        let isAutotest = arguments.contains("--autotest")
 
         if !isAutotest {
             // Default-on launch-at-login: starts quietly in the menu bar,
@@ -96,10 +117,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Default-on launch-at-login, applied once on first run. After that the
+    /// menu bar toggle is the source of truth, so turning it off sticks.
     static func registerLoginItemIfNeeded() {
+        let defaults = UserDefaults.standard
+        let key = "didApplyDefaultLoginItem"
+        guard !defaults.bool(forKey: key) else { return }
+        defaults.set(true, forKey: key)
         let service = SMAppService.mainApp
         guard service.status != .enabled else { return }
         try? service.register()
+    }
+
+    /// True when macOS opened the app as a login item (the launch Apple event
+    /// carries keyAELaunchedAsLogInItem).
+    static func wasLaunchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
+        return event.eventID == kAEOpenApplication
+            && event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
     }
 
     static func renderScreenshot(to path: String) {

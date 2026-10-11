@@ -14,10 +14,16 @@ jobs:
         run: swift build
 
       - name: Smoke autotest (8s, crossfade switches)
-        run: .build/debug/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2 | tee /tmp/smoke.log && grep -q AUTOTEST_COMPLETE /tmp/smoke.log
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2 | tee /tmp/smoke.log && grep -q AUTOTEST_COMPLETE /tmp/smoke.log && grep -q 'SWITCH_CHECK ok' /tmp/smoke.log
 
       - name: Stop/restart autotest (16s)
-        run: .build/debug/NeuraWave --autotest --autotest-seconds 16 --autotest-cycle 3 --autotest-stop-at 6 | tee /tmp/stop.log && grep -q AUTOTEST_COMPLETE /tmp/stop.log
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 16 --autotest-cycle 3 --autotest-stop-at 6 | tee /tmp/stop.log && grep -q AUTOTEST_COMPLETE /tmp/stop.log && grep -q 'SWITCH_CHECK ok' /tmp/stop.log
 
       - name: Program-advance autotest (45s, Alpha→Beta→Gamma)
-        run: .build/debug/NeuraWave --autotest --autotest-seconds 45 --autotest-cycle 30 --autotest-program-seconds 45 | tee /tmp/prog.log && grep -q "PROGRAM_STEP 3/3" /tmp/prog.log && grep -q AUTOTEST_COMPLETE /tmp/prog.log
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 45 --autotest-cycle 30 --autotest-program-seconds 45 | tee /tmp/prog.log && grep -q "PROGRAM_STEP 3/3" /tmp/prog.log && grep -q AUTOTEST_COMPLETE /tmp/prog.log && grep -q 'SWITCH_CHECK ok' /tmp/prog.log
+
+      - name: Switch stress autotest (30s, a switch every 2s, none may be lost)
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 30 --autotest-cycle 2 | tee /tmp/stress.log && grep -q 'SWITCH_CHECK ok' /tmp/stress.log
+
+      - name: Pause/resume autotest (pause 5s-12s)
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 20 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 12 | tee /tmp/pause.log && grep -q AUTOTEST_RESUME /tmp/pause.log && grep -q 'SWITCH_CHECK ok' /tmp/pause.log
