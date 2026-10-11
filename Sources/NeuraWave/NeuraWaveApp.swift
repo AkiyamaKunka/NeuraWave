@@ -51,6 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             DispatchQueue.main.async(execute: hide)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: hide)
+        } else if isAutotest {
+            // Self-tests run alongside whatever you are doing: show the
+            // window (some probes need it) but never steal focus, so a
+            // stray Space keypress can't pause the run.
+            NSApp.setActivationPolicy(.regular)
         } else {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)

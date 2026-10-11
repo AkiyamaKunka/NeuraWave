@@ -97,7 +97,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         show.target = self
         menu.addItem(show)
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            login.state = .on
+        case .requiresApproval:
+            login.state = .mixed
+            login.title = "Launch at Login (approve in System Settings)"
+        default:
+            login.state = .off
+        }
         login.target = self
         menu.addItem(login)
         let quit = NSMenuItem(title: "Quit NeuraWave", action: #selector(quitApp), keyEquivalent: "q")
@@ -123,6 +131,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             try? service.unregister()
         } else {
             try? service.register()
+            // macOS can require the user to approve login items; without
+            // this the toggle just silently stays off.
+            if service.status == .requiresApproval {
+                SMAppService.openSystemSettingsLoginItems()
+            }
         }
     }
 
