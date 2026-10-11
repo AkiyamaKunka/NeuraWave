@@ -66,8 +66,31 @@ struct BrainwavePreset: Identifiable, Hashable {
         )
     ]
 
+    /// Non-fatal lookup: an id that no longer exists (corrupted defaults,
+    /// hand-written argument) falls back to a neutral preset instead of
+    /// crashing the app on a force-unwrap.
     static func byId(_ id: String) -> BrainwavePreset {
-        all.first { $0.id == id }!
+        all.first { $0.id == id } ?? BrainwavePreset(
+            id: "unknown",
+            name: "Unknown",
+            band: "—",
+            beat: 10,
+            carrier: 240,
+            detail: "Unrecognized preset",
+            color: .gray
+        )
+    }
+}
+
+/// Volume range the UI offers; anything else in saved settings (a bad
+/// value, a hand-edited plist) is pulled back into it.
+enum VolumeLevel {
+    static let range: ClosedRange<Double> = 0.05...1.0
+    static let defaultValue = 0.385
+
+    static func sanitized(_ value: Double?) -> Double {
+        guard let value, value.isFinite else { return defaultValue }
+        return min(max(value, range.lowerBound), range.upperBound)
     }
 }
 
@@ -87,6 +110,19 @@ struct FocusProgram: Identifiable, Hashable {
     }
 
     var totalSeconds: TimeInterval { steps.reduce(0) { $0 + $1.seconds } }
+
+    /// Index of the step playing `elapsed` seconds into the program (the last
+    /// step once the schedule is over; negative time counts as the start).
+    func stepIndex(at elapsed: TimeInterval) -> Int {
+        var end: TimeInterval = 0
+        for (index, step) in steps.enumerated() {
+            end += step.seconds
+            if elapsed < end {
+                return index
+            }
+        }
+        return max(0, steps.count - 1)
+    }
 
     static let all: [FocusProgram] = [
         FocusProgram(

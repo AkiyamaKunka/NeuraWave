@@ -7,8 +7,11 @@ struct NeuraWaveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("NeuraWave") {
+        // A single-instance Window (not a WindowGroup): "Show Window" can
+        // always bring back the one main window, even after it was closed.
+        Window("NeuraWave", id: AppDelegate.mainWindowID) {
             ContentView()
+                .modifier(OpenWindowBridge())
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
@@ -17,22 +20,55 @@ struct NeuraWaveApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static let mainWindowID = "main"
+    /// SwiftUI's openWindow action, captured from the view tree so AppKit
+    /// code (menu bar, Dock reopen) can recreate a closed window.
+    static var openMainWindow: (() -> Void)?
+
     private var menuBar: MenuBarController?
+    private var launchedAtLogin = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        launchedAtLogin = Self.wasLaunchedAsLoginItem()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        menuBar = MenuBarController(session: SessionController.shared, showWindow: { Self.showWindow() })
-
+        // The launch ('oapp') event is normally being handled during this
+        // callback; check here as well as in willFinish to be safe.
+        launchedAtLogin = launchedAtLogin || Self.wasLaunchedAsLoginItem()
         let arguments = ProcessInfo.processInfo.arguments
+        let isAutotest = arguments.contains("--autotest")
+        let launchedAtLogin = !isAutotest && self.launchedAtLogin
+
+        if launchedAtLogin {
+            // Login launch: menu bar only, no window, no focus stealing.
+            NSApp.setActivationPolicy(.accessory)
+            // orderOut (not close) keeps the window alive so "Show Window"
+            // can bring it straight back. SwiftUI may present it a beat
+            // after launch, so hide on the next turn and once more after.
+            let hide: @MainActor @Sendable () -> Void = {
+                for window in NSApp.windows where window.title == "NeuraWave" {
+                    window.orderOut(nil)
+                }
+            }
+            DispatchQueue.main.async(execute: hide)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: hide)
+        } else if isAutotest {
+            // Self-tests run alongside whatever you are doing: show the
+            // window (some probes need it) but never steal focus, so a
+            // stray Space keypress can't pause the run.
+            NSApp.setActivationPolicy(.regular)
+        } else {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        menuBar = MenuBarController(session: SessionController.shared, showWindow: { Self.showWindow() })
 
         // Headless screenshot rendering for docs (--screenshot <path>):
         // renders the real UI at 2x scale for a crisp README image.
         if let idx = arguments.firstIndex(of: "--screenshot"), idx + 1 < arguments.count {
             Self.renderScreenshot(to: arguments[idx + 1])
         }
-
-        let isAutotest = arguments.contains("--autotest")
 
         if !isAutotest {
             // Default-on launch-at-login: starts quietly in the menu bar,
@@ -45,10 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 forName: NSWindow.willCloseNotification,
                 object: nil,
                 queue: .main
-            ) { note in
-                guard let window = note.object as? NSWindow, window.title == "NeuraWave" else { return }
+            ) { _ in
+                // Any window closing re-checks whether the main window is
+                // still visible (after the close has completed).
                 DispatchQueue.main.async {
-                    if !NSApp.windows.contains(where: { $0.title == "NeuraWave" && $0.isVisible }) {
+                    // A minimized main window still counts as open (keeps
+                    // its Dock tile).
+                    if !NSApp.windows.contains(where: { $0.title == "NeuraWave" && ($0.isVisible || $0.isMiniaturized) }) {
                         NSApp.setActivationPolicy(.accessory)
                     }
                 }
@@ -70,9 +109,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 timerMinutes: timerMinutes > 0 ? timerMinutes : nil,
                 stopAtSeconds: stopAt,
                 volume: volume,
-                programSeconds: programSeconds
+                programSeconds: programSeconds,
+                arguments: arguments
             )
+            if arguments.contains("--autotest-window-check") {
+                Self.runWindowCheck()
+            }
         }
+    }
+
+    /// Autotest: close the main window, then "Show Window" must bring it back.
+    /// Needs a logged-in, awake display; otherwise no window is ever shown.
+    private static func runWindowCheck() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            let mainWindows = NSApp.windows.filter { $0.title == "NeuraWave" && $0.isVisible }
+            guard !mainWindows.isEmpty else {
+                print("WINDOW_CHECK skipped (no window presented; display asleep or locked?)")
+                return
+            }
+            mainWindows.forEach { $0.performClose(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                showWindow()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let visible = NSApp.windows.contains { $0.title == "NeuraWave" && $0.isVisible }
+                print("WINDOW_CHECK \(visible ? "ok" : "FAIL")")
+            }
+        }
+    }
+
+    /// Quitting mid-session (⌘Q, menu bar Quit) would cut the tone off
+    /// mid-cycle — an audible click. Glide the level to zero first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let session = SessionController.shared
+        guard session.engine.isAudible else { return .terminateNow }
+        session.engine.update(volume: 0, noiseEnabled: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            session.stop()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -93,12 +169,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
             return
         }
+        // The window was closed and released: ask SwiftUI for a new one.
+        openMainWindow?()
     }
 
+    /// Default-on launch-at-login, applied once on first run. After that the
+    /// menu bar toggle is the source of truth, so turning it off sticks.
     static func registerLoginItemIfNeeded() {
+        let defaults = UserDefaults.standard
+        let key = "didApplyDefaultLoginItem"
+        guard !defaults.bool(forKey: key) else { return }
         let service = SMAppService.mainApp
-        guard service.status != .enabled else { return }
-        try? service.register()
+        if service.status != .enabled {
+            try? service.register()
+        }
+        // Only remember once it took (a first run from a translocated DMG
+        // copy can fail); otherwise try again next launch.
+        if service.status == .enabled || service.status == .requiresApproval {
+            defaults.set(true, forKey: key)
+        }
+    }
+
+    /// True when macOS opened the app as a login item (the launch Apple event
+    /// carries keyAELaunchedAsLogInItem).
+    static func wasLaunchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
+        return event.eventID == kAEOpenApplication
+            && event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
     }
 
     static func renderScreenshot(to path: String) {
@@ -144,5 +241,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return arguments[index + 1]
         }
         return nil
+    }
+}
+
+/// Hands SwiftUI's openWindow action to AppDelegate once the view exists.
+private struct OpenWindowBridge: ViewModifier {
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            AppDelegate.openMainWindow = { openWindow(id: AppDelegate.mainWindowID) }
+        }
     }
 }
