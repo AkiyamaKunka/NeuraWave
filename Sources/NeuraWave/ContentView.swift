@@ -56,17 +56,21 @@ struct ContentView: View {
             UserDefaults.standard.set(newValue, forKey: "noise")
             session.updateLive(volume: volume, noiseEnabled: newValue)
         }
-        .onChange(of: session.currentPreset.id) { _, _ in
-            // Presets changed outside the grid (AirPods / Control Center
-            // skip) move the selection too. Program steps don't: they are
-            // the program's, not the user's choice.
-            let current = session.currentPreset
-            guard session.isPlaying, !session.isRunningProgram,
-                  BrainwavePreset.all.contains(where: { $0.id == current.id }),
-                  current.id != selected.id else { return }
-            selected = current
-            UserDefaults.standard.set(current.id, forKey: "preset")
-        }
+        // Presets changed outside the grid (AirPods / Control Center skip,
+        // menu bar) move the selection too, including while the window was
+        // closed. Program steps don't: they are the program's, not yours.
+        .onChange(of: session.currentPreset.id) { _, _ in syncSelectionWithSession() }
+        .onChange(of: session.isPlaying) { _, _ in syncSelectionWithSession() }
+        .onAppear { syncSelectionWithSession() }
+    }
+
+    private func syncSelectionWithSession() {
+        let current = session.currentPreset
+        guard session.isPlaying, !session.isRunningProgram,
+              BrainwavePreset.all.contains(where: { $0.id == current.id }),
+              current.id != selected.id else { return }
+        selected = current
+        UserDefaults.standard.set(current.id, forKey: "preset")
     }
 
     @ViewBuilder

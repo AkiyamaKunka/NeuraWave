@@ -34,7 +34,6 @@ final class SessionController: ObservableObject {
     private var lastPushedSecond = -1
     private var program: FocusProgram?
     private var programStartedAt = Date()
-    private var lastProgram: FocusProgram?
     private var autotestProgram = false
     private var autotestRunning = false
     private var autotestTimer: Timer?
@@ -95,9 +94,6 @@ final class SessionController: ObservableObject {
         minutes: Int?
     ) {
         stop()
-        // A single-preset session replaces any earlier program as "the last
-        // thing played", so the menu bar / AirPods restart this, not that.
-        lastProgram = nil
         lastStartConfig = (preset, style, volume, withNoise, minutes)
         guard engine.start(preset: preset, style: style, volume: Float(volume), withNoise: withNoise) else {
             lastError = Self.audioFailureMessage
@@ -110,6 +106,7 @@ final class SessionController: ObservableObject {
         resetPauseBookkeeping()
         isRunningProgram = false
         currentPreset = preset
+        rememberPreset(preset)
         sessionTitle = preset.name
 
         if let minutes {
@@ -125,21 +122,15 @@ final class SessionController: ObservableObject {
         pushNowPlaying()
     }
 
-    /// Restarts the most recent configuration (used by the menu bar item).
+    /// Start from the menu bar / AirPods while stopped: exactly what the
+    /// window's Start button would play right now (program or preset, style,
+    /// volume, noise, timer), all of which the window saves as you change
+    /// them. Replaying an in-memory "last config" instead mixed stale and
+    /// fresh settings (e.g. an old style or timer).
     func startLast() {
-        if let prog = lastProgram, let cfg = lastStartConfig {
-            startProgram(prog, style: cfg.style, volume: cfg.volume, withNoise: cfg.withNoise)
-            return
-        }
-        guard let last = lastStartConfig else {
-            startFromSavedSettings()
-            return
-        }
-        start(preset: last.preset, style: last.style, volume: last.volume, withNoise: last.withNoise, minutes: last.minutes)
+        startFromSavedSettings()
     }
 
-    /// Nothing played yet this launch (e.g. started at login, menu bar only):
-    /// use the choices saved by the window instead of hard-coded defaults.
     private func startFromSavedSettings() {
         let defaults = UserDefaults.standard
         let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
@@ -154,10 +145,17 @@ final class SessionController: ObservableObject {
         start(preset: preset, style: style, volume: volume, withNoise: noise, minutes: minutes > 0 ? minutes : nil)
     }
 
+    /// The playing single preset becomes the saved choice, whoever picked it
+    /// (window, menu bar, AirPods skip), so a reopened window and the next
+    /// Start agree with what you last heard.
+    private func rememberPreset(_ preset: BrainwavePreset) {
+        guard !autotestRunning, BrainwavePreset.all.contains(where: { $0.id == preset.id }) else { return }
+        UserDefaults.standard.set(preset.id, forKey: "preset")
+    }
+
     /// Menu bar "Presets" submenu: switch the playing preset in place, or
     /// start it fresh with the window's saved style, volume and timer.
     func playPreset(_ preset: BrainwavePreset) {
-        UserDefaults.standard.set(preset.id, forKey: "preset")
         if isPlaying, program == nil, let cfg = lastStartConfig {
             if isPaused {
                 resumePlayback()
@@ -176,7 +174,6 @@ final class SessionController: ObservableObject {
     /// crossfade, and the session stops itself when the schedule ends.
     func startProgram(_ program: FocusProgram, style: ToneStyle, volume: Double, withNoise: Bool) {
         stop()
-        lastProgram = program
         let first = program.steps[0].preset
         lastStartConfig = (first, style, volume, withNoise, nil)
         guard engine.start(preset: first, style: style, volume: Float(volume), withNoise: withNoise) else {
@@ -187,7 +184,9 @@ final class SessionController: ObservableObject {
         lastError = nil
         resetPauseBookkeeping()
         isRunningProgram = true
-        nowPlaying.setSkipEnabled(false)
+        if publishesNowPlaying {
+            nowPlaying.setSkipEnabled(false)
+        }
         currentPreset = first
         self.program = program
         programStartedAt = Date()
@@ -218,6 +217,7 @@ final class SessionController: ObservableObject {
         if program == nil {
             // During a program the title stays "Program · Step".
             sessionTitle = preset.name
+            rememberPreset(preset)
         }
         pushNowPlaying()
     }
@@ -269,8 +269,10 @@ final class SessionController: ObservableObject {
         isPaused = false
         isRunningProgram = false
         resetPauseBookkeeping()
-        nowPlaying.setSkipEnabled(true)
-        nowPlaying.clear()
+        if publishesNowPlaying {
+            nowPlaying.setSkipEnabled(true)
+            nowPlaying.clear()
+        }
     }
 
     func clearError() {
@@ -437,6 +439,13 @@ final class SessionController: ObservableObject {
         switchPreset(preset: all[nextIndex], style: cfg.style, volume: cfg.volume, withNoise: cfg.withNoise)
     }
 
+    /// Self-tests stay out of Control Center / Now Playing (they would take
+    /// it over from whatever you're listening to) unless asked to cover it
+    /// with --autotest-now-playing.
+    private var publishesNowPlaying: Bool {
+        !autotestRunning || autotestArguments.contains("--autotest-now-playing")
+    }
+
     private func pushNowPlaying() {
         guard isPlaying else { return }
         var elapsed: TimeInterval = 0
@@ -449,7 +458,9 @@ final class SessionController: ObservableObject {
             duration = total
             elapsed = max(0, total - Double(remainingSeconds ?? 0))
         }
-        nowPlaying.update(title: sessionTitle, elapsed: elapsed, duration: duration, playing: true, paused: isPaused)
+        if publishesNowPlaying {
+            nowPlaying.update(title: sessionTitle, elapsed: elapsed, duration: duration, playing: true, paused: isPaused)
+        }
     }
 
     // MARK: - Automated self-test (launched with --autotest)
@@ -563,7 +574,7 @@ final class SessionController: ObservableObject {
         // Preset cycling continues after stop/restart so the whole matrix is
         // exercised across the run (previously it stopped after a manual stop).
         if elapsed - autotestLastCycle.timeIntervalSince(autotestStartedAt) >= Double(autotestCycle),
-           isPlaying, !autotestProgram {
+           isPlaying, !isPaused, !autotestProgram {
             autotestLastCycle = Date()
             autotestConfigIndex += 1
             let config = Self.autotestConfigs[autotestConfigIndex % Self.autotestConfigs.count]

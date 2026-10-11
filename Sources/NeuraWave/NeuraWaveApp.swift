@@ -29,11 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchedAtLogin = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // The launch Apple event is only "current" this early.
         launchedAtLogin = Self.wasLaunchedAsLoginItem()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The launch ('oapp') event is normally being handled during this
+        // callback; check here as well as in willFinish to be safe.
+        launchedAtLogin = launchedAtLogin || Self.wasLaunchedAsLoginItem()
         let arguments = ProcessInfo.processInfo.arguments
         let isAutotest = arguments.contains("--autotest")
         let launchedAtLogin = !isAutotest && self.launchedAtLogin
@@ -83,7 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Any window closing re-checks whether the main window is
                 // still visible (after the close has completed).
                 DispatchQueue.main.async {
-                    if !NSApp.windows.contains(where: { $0.title == "NeuraWave" && $0.isVisible }) {
+                    // A minimized main window still counts as open (keeps
+                    // its Dock tile).
+                    if !NSApp.windows.contains(where: { $0.title == "NeuraWave" && ($0.isVisible || $0.isMiniaturized) }) {
                         NSApp.setActivationPolicy(.accessory)
                     }
                 }
@@ -138,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// mid-cycle — an audible click. Glide the level to zero first.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let session = SessionController.shared
-        guard session.engine.isPlaying else { return .terminateNow }
+        guard session.engine.isAudible else { return .terminateNow }
         session.engine.update(volume: 0, noiseEnabled: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             session.stop()
@@ -175,10 +179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let defaults = UserDefaults.standard
         let key = "didApplyDefaultLoginItem"
         guard !defaults.bool(forKey: key) else { return }
-        defaults.set(true, forKey: key)
         let service = SMAppService.mainApp
-        guard service.status != .enabled else { return }
-        try? service.register()
+        if service.status != .enabled {
+            try? service.register()
+        }
+        // Only remember once it took (a first run from a translocated DMG
+        // copy can fail); otherwise try again next launch.
+        if service.status == .enabled || service.status == .requiresApproval {
+            defaults.set(true, forKey: key)
+        }
     }
 
     /// True when macOS opened the app as a login item (the launch Apple event

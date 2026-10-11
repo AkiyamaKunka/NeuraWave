@@ -17,7 +17,7 @@ jobs:
         run: swift test
 
       - name: Smoke autotest (8s, crossfade switches)
-        run: .build/debug/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2 | tee /tmp/smoke.log && grep -q AUTOTEST_COMPLETE /tmp/smoke.log && grep -q 'SWITCH_CHECK ok' /tmp/smoke.log
+        run: .build/debug/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2 --autotest-now-playing | tee /tmp/smoke.log && grep -q AUTOTEST_COMPLETE /tmp/smoke.log && grep -q 'SWITCH_CHECK ok' /tmp/smoke.log
 
       - name: Stop/restart autotest (16s)
         run: .build/debug/NeuraWave --autotest --autotest-seconds 16 --autotest-cycle 3 --autotest-stop-at 6 | tee /tmp/stop.log && grep -q AUTOTEST_COMPLETE /tmp/stop.log && grep -q 'SWITCH_CHECK ok' /tmp/stop.log

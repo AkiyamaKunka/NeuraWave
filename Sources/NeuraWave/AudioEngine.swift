@@ -313,6 +313,8 @@ final class AudioEngine: ObservableObject {
     private let engine = AVAudioEngine()
     private let state = RealtimeState()
     private var sourceNode: AVAudioSourceNode?
+    /// Sample rate the current node was built for.
+    private var nodeSampleRate: Double = 0
     private var stopGeneration = 0
     private var isPaused = false
     private var keepAwakeActivity: NSObjectProtocol?
@@ -346,7 +348,16 @@ final class AudioEngine: ObservableObject {
         isPaused = false
         lastConfig = (preset, style, volume, noiseEnabled)
 
+        // The system stopped the engine under us (device change during a
+        // stop fade): don't reuse that node mid-fade, rebuild from silence.
+        if sourceNode != nil, !engine.isRunning {
+            teardownNode()
+        }
+
         if sourceNode == nil {
+            // Building a fresh chain supersedes any queued device rebuild.
+            pendingRebuild?.cancel()
+            pendingRebuild = nil
             let output = engine.outputNode
             let sampleRate = output.outputFormat(forBus: 0).sampleRate
             guard sampleRate > 0,
@@ -358,6 +369,7 @@ final class AudioEngine: ObservableObject {
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
             sourceNode = node
+            nodeSampleRate = sampleRate
         }
 
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
@@ -463,6 +475,12 @@ final class AudioEngine: ObservableObject {
         return start(preset: cfg.preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.noiseEnabled)
     }
 
+    /// Something may still be coming out of the speakers (including the
+    /// tail of a stop fade), so quitting now would click.
+    var isAudible: Bool {
+        sourceNode != nil && engine.isRunning && state.diagnostics().gain > 0.001
+    }
+
     var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
         state.diagnostics()
     }
@@ -487,6 +505,8 @@ final class AudioEngine: ObservableObject {
 
     /// Autotest hook: behave exactly as if the output device had changed.
     func simulateConfigurationChange() {
+        // A real device switch stops the engine before notifying.
+        engine.stop()
         NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine)
     }
 
@@ -494,6 +514,12 @@ final class AudioEngine: ObservableObject {
         // Only an active session needs the chain back. A paused one is rebuilt
         // on resume anyway; idle has nothing to restore.
         guard isPlaying, !isPaused, sourceNode != nil, let cfg = lastConfig else { return }
+        // Nothing actually changed for us (e.g. the notification our own
+        // rebuild can trigger): rebuilding again would cut the fade-in and,
+        // worst case, loop forever.
+        if engine.isRunning, engine.outputNode.outputFormat(forBus: 0).sampleRate == nodeSampleRate {
+            return
+        }
         deviceRebuilds += 1
         teardownNode()
         if !start(preset: cfg.preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.noiseEnabled) {
