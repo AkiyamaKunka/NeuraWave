@@ -92,6 +92,26 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(stop)
         }
 
+        // Presets straight from the menu bar (the window is optional).
+        let presets = NSMenuItem(title: "Presets", action: nil, keyEquivalent: "")
+        let presetMenu = NSMenu()
+        for preset in BrainwavePreset.all {
+            let item = NSMenuItem(
+                title: "\(preset.name) · \(preset.band)",
+                action: #selector(playPreset(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = preset.id
+            item.state = session.isPlaying && session.currentPreset.id == preset.id ? .on : .off
+            // A running program owns the preset sequence.
+            item.isEnabled = !session.isRunningProgram
+            presetMenu.addItem(item)
+        }
+        presetMenu.autoenablesItems = false
+        presets.submenu = presetMenu
+        menu.addItem(presets)
+
         menu.addItem(.separator())
         let show = NSMenuItem(title: "Show Window", action: #selector(openWindow), keyEquivalent: "")
         show.target = self
@@ -115,6 +135,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func togglePlayback() {
         session.togglePlayPause()
+    }
+
+    @objc private func playPreset(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let preset = BrainwavePreset.all.first(where: { $0.id == id }) else { return }
+        session.playPreset(preset)
     }
 
     @objc private func stopPlayback() {

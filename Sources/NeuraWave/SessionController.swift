@@ -154,6 +154,24 @@ final class SessionController: ObservableObject {
         start(preset: preset, style: style, volume: volume, withNoise: noise, minutes: minutes > 0 ? minutes : nil)
     }
 
+    /// Menu bar "Presets" submenu: switch the playing preset in place, or
+    /// start it fresh with the window's saved style, volume and timer.
+    func playPreset(_ preset: BrainwavePreset) {
+        UserDefaults.standard.set(preset.id, forKey: "preset")
+        if isPlaying, program == nil, let cfg = lastStartConfig {
+            if isPaused {
+                resumePlayback()
+            }
+            switchPreset(preset: preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.withNoise)
+            return
+        }
+        let defaults = UserDefaults.standard
+        let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
+        let volume = VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double)
+        let minutes = defaults.integer(forKey: "minutes")
+        start(preset: preset, style: style, volume: volume, withNoise: defaults.bool(forKey: "noise"), minutes: minutes > 0 ? minutes : nil)
+    }
+
     /// Runs a timed program: presets auto-advance through the click-free
     /// crossfade, and the session stops itself when the schedule ends.
     func startProgram(_ program: FocusProgram, style: ToneStyle, volume: Double, withNoise: Bool) {
