@@ -9,6 +9,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let session: SessionController
     private let showWindow: () -> Void
     private var cancellables = Set<AnyCancellable>()
+    /// The "Remaining" line while the menu is open, kept ticking live.
+    private weak var countdownItem: NSMenuItem?
 
     init(session: SessionController, showWindow: @escaping () -> Void) {
         self.session = session
@@ -33,6 +35,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             }
             .store(in: &cancellables)
 
+        // The session's countdown ticks in .common run-loop modes, so this
+        // keeps updating while the menu is open and tracking.
+        session.$remainingSeconds
+            .sink { [weak self] remaining in
+                guard let remaining, let item = self?.countdownItem else { return }
+                item.title = Self.countdownTitle(remaining)
+            }
+            .store(in: &cancellables)
+
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -45,6 +56,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         rebuild(menu)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        countdownItem = nil
+    }
+
+    private static func countdownTitle(_ remaining: Int) -> String {
+        "Remaining \(TimeFormat.clock(remaining))"
     }
 
     private func rebuild(_ menu: NSMenu) {
@@ -66,7 +85,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard session.isPlaying else { return }
         menu.addItem(info(session.programTitle ?? session.sessionTitle))
         if let remaining = session.remainingSeconds {
-            menu.addItem(info("Remaining \(TimeFormat.clock(remaining))"))
+            let countdown = info(Self.countdownTitle(remaining))
+            countdownItem = countdown
+            menu.addItem(countdown)
         }
         menu.addItem(action("Stop", #selector(stopPlayback)))
     }

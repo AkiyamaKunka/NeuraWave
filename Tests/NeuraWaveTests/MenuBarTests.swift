@@ -20,4 +20,32 @@ final class MenuBarTests: XCTestCase {
         XCTAssertEqual(presets?.items.count, BrainwavePreset.all.count)
         XCTAssertTrue(presets?.items.allSatisfy { $0.isEnabled && $0.state == .off } ?? false)
     }
+
+    func testPlayingMenuAndLiveCountdown() {
+        var clock = Date(timeIntervalSinceReferenceDate: 0)
+        let suite = "NeuraWaveTests.MenuBar"
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: suite)!)
+        defer { settings.defaults.removePersistentDomain(forName: suite) }
+        let session = SessionController(audio: FakeAudio(), nowPlaying: FakeNowPlaying(), settings: settings) { clock }
+        let controller = MenuBarController(session: session, showWindow: {})
+        session.start(preset: BrainwavePreset.byId("relax"), style: .binaural, volume: 0.4, withNoise: false, minutes: 15)
+
+        let menu = NSMenu()
+        controller.menuNeedsUpdate(menu)
+        let titles = menu.items.map(\.title)
+        XCTAssertTrue(titles.contains("Pause"))
+        XCTAssertTrue(titles.contains("Relax"))
+        XCTAssertTrue(titles.contains("Remaining 15:00"))
+        XCTAssertTrue(titles.contains("Stop"))
+        let relax = menu.items.first { $0.title == "Presets" }?.submenu?.items.first { $0.title.hasPrefix("Relax") }
+        XCTAssertEqual(relax?.state, .on)
+
+        // While the menu stays open, the countdown keeps ticking.
+        clock = clock.addingTimeInterval(65)
+        session.tick()
+        XCTAssertTrue(menu.items.map(\.title).contains("Remaining 13:55"))
+
+        controller.menuDidClose(menu)
+        session.stop()
+    }
 }
