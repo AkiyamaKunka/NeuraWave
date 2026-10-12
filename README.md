@@ -117,6 +117,9 @@ make it silent.
 # 8-second smoke test
 build/NeuraWave.app/Contents/MacOS/NeuraWave --autotest --autotest-seconds 8 --autotest-cycle 2
 
+# Every short scenario in parallel (~75 s), as CI runs them
+swift build && bash scripts/quick-tests.sh --autotest-volume 0
+
 # Full battery incl. a 30-minute endurance run, with pass/fail reporting
 bash scripts/run-tests.sh
 AUTOTEST_EXTRA_ARGS="--autotest-volume 0" bash scripts/run-tests.sh   # silent
@@ -134,8 +137,7 @@ in-run check. Extra probes:
 - `--autotest-now-playing`: publish Now Playing during the run.
 
 CI on GitHub Actions runs a Swift 6 strict-concurrency build, the unit tests,
-and the smoke, stop/restart, program-advance, switch-stress, pause/resume and
-device-change scenarios on a clean macOS runner for every push.
+and every `quick-tests.sh` scenario on a clean macOS runner for every push.
 
 ## 🛟 Safety
 
