@@ -31,8 +31,10 @@ menu bar soul.
   then ramps into Beta. Coding Sprint warms up, peaks at Gamma, then cools down.
   Mental Rest descends into Theta and brings you back — all with click-free
   crossfade transitions.
-- 🌙 **Lives in the menu bar.** Close the window and it keeps playing. Starts at
-  login silently — no sound until you press Start. Quits only when you quit it.
+- 🌙 **Lives in the menu bar.** Close the window and it keeps playing; pick
+  presets, pause or stop right from the menu. Starts at login silently — no
+  sound until you press Start. Sleep timers ease out gently over the last 30 s.
+- 🔋 **Light on battery.** Under 1% CPU while playing, window open or not.
 - 🎧 **AirPods & Now Playing.** Single-press pauses/resumes with a click-free
   fade, double-press skips presets, and live progress appears in Control Center.
 - 🔒 **Zero noise.** No accounts, no analytics, no network calls. Free, open
