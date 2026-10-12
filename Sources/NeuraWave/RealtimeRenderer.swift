@@ -222,15 +222,20 @@ struct Voice {
     /// Isochronic pulses spend time quieter than full level; this restores
     /// the same average loudness (RMS) the original 45–100% pulses had, so
     /// switching styles or updating doesn't make the tone quieter.
-    static let isochronicLoudness: Float = {
-        // Mean square of the envelope 1 - d + d·u with u = ½ + ½·sin:
-        // E[u] = ½, E[u²] = ⅜.
-        func meanSquare(_ depth: Float) -> Float {
-            let floor = 1 - depth
-            return floor * floor + 2 * floor * depth * 0.5 + depth * depth * 0.375
+    /// A precomputed constant (no lazy initialization on the audio thread):
+    /// √(meanSquare(0.55) / meanSquare(isochronicDepth)), checked by
+    /// IsochronicTests against `loudnessFactor(depth:)`.
+    static let isochronicLoudness: Float = 1.2257
+
+    /// Mean square of the envelope 1 − d + d·u with u = ½ + ½·sin
+    /// (E[u] = ½, E[u²] = ⅜), relative to the original 0.55 depth.
+    static func loudnessFactor(depth: Float) -> Float {
+        func meanSquare(_ d: Float) -> Float {
+            let floor = 1 - d
+            return floor * floor + 2 * floor * d * 0.5 + d * d * 0.375
         }
-        return (meanSquare(0.55) / meanSquare(isochronicDepth)).squareRoot()
-    }()
+        return (meanSquare(0.55) / meanSquare(depth)).squareRoot()
+    }
 
     /// Next stereo tone sample (before volume and fades). Peaks stay within
     /// [-1.25, 1.25]; the caller's levels keep the output well inside ±1.

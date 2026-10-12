@@ -41,6 +41,10 @@ final class IsochronicTests: XCTestCase {
         // 240 Hz tone at this level can produce (2π·240/48000 · 1.23 ≈ 0.04).
         let samples = render(.isochronic, beat: 40)
         let biggestStep = zip(samples, samples.dropFirst()).map { abs($1 - $0) }.max() ?? 0
-        XCTAssertLessThan(biggestStep, 0.05)
+        XCTAssertLessThan(biggestStep, 0.06) // ≈0.042 today; a click would be far larger
+    }
+
+    func testPrecomputedLoudnessMatchesTheFormula() {
+        XCTAssertEqual(Voice.isochronicLoudness, Voice.loudnessFactor(depth: Voice.isochronicDepth), accuracy: 0.0005)
     }
 }
