@@ -162,6 +162,9 @@ final class SessionController: ObservableObject {
         guard isPlaying else { return }
         audio.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
         playback = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
+        if isEndingFadeApplied, let clock {
+            applyEndingFade(remaining: clock.remaining(at: now())) // stay eased out
+        }
         currentPreset = preset
         if program == nil {
             // During a program the title stays "Program · Step".
@@ -179,6 +182,7 @@ final class SessionController: ObservableObject {
         let now = self.now()
         clock.setRemaining(minutes.map { Double($0) * 60 }, at: now)
         self.clock = clock
+        applyEndingFade(remaining: clock.remaining(at: now))
         publishRemaining(clock.remaining(at: now))
         updateTicker()
         pushNowPlaying()
@@ -187,9 +191,14 @@ final class SessionController: ObservableObject {
     /// Immediate volume/noise change (no crossfade needed). Also fine while
     /// stopped: the engine keeps the level for the next start.
     func updateLive(volume: Double, noiseEnabled: Bool) {
-        audio.update(volume: Float(volume), noiseEnabled: noiseEnabled)
         playback?.volume = volume
         playback?.noise = noiseEnabled
+        if isEndingFadeApplied, let clock {
+            // Keep easing out, now relative to the new level.
+            applyEndingFade(remaining: clock.remaining(at: now()))
+        } else {
+            audio.update(volume: Float(volume), noiseEnabled: noiseEnabled)
+        }
     }
 
     // MARK: - Stopping
@@ -206,6 +215,7 @@ final class SessionController: ObservableObject {
         programStep = nil
         programTitle = nil
         isRunningProgram = false
+        isEndingFadeApplied = false
         if publishesNowPlaying {
             nowPlaying.setSkipEnabled(true)
             nowPlaying.clear()
@@ -247,7 +257,27 @@ final class SessionController: ObservableObject {
         if let program {
             advanceProgram(program, elapsed: clock.elapsed(at: now))
         }
+        applyEndingFade(remaining: clock.remaining(at: now))
         publishRemaining(clock.remaining(at: now))
+    }
+
+    /// Sleep timers and programs don't end abruptly: over the last 30 s the
+    /// volume eases down to silence (then the regular stop fade follows), so
+    /// the end of a Deep Sleep timer doesn't wake you.
+    static let endingFadeSeconds: TimeInterval = 30
+    private var isEndingFadeApplied = false
+
+    private func applyEndingFade(remaining: TimeInterval?) {
+        guard let playback else { return }
+        if let remaining, remaining < Self.endingFadeSeconds {
+            let factor = max(0, remaining / Self.endingFadeSeconds)
+            audio.update(volume: Float(playback.volume * factor), noiseEnabled: playback.noise)
+            isEndingFadeApplied = true
+        } else if isEndingFadeApplied {
+            // The timer was extended or removed mid-fade: back to full level.
+            audio.update(volume: Float(playback.volume), noiseEnabled: playback.noise)
+            isEndingFadeApplied = false
+        }
     }
 
     /// The countdown ticks twice a second but its value changes once a second;

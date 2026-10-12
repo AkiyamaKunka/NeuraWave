@@ -26,6 +26,7 @@
 - App icon as Now Playing artwork; Now Playing play state reported correctly.
 - Volume and noise changes glide instead of stepping.
 - Picking a timer mid-session applies immediately.
+- Sleep timers and programs ease out over their last 30 seconds instead of stopping with a 2-second fade.
 - New `scripts/make-dmg.sh`: builds a drag-to-Applications DMG (refuses to overwrite an existing one).
 
 ### Changed
