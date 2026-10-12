@@ -24,11 +24,24 @@ enum ToneStyle: String, CaseIterable, Identifiable {
 /// - The main thread owns `running`, `volume`, `noiseEnabled` and
 ///   `pendingTone`; the render thread only reads them (and *takes*
 ///   `pendingTone` under the lock).
-/// - The render thread owns `tone`, `gain`, the phases, the noise generator
+/// - The render thread owns `tone`, `gain`, the oscillators, the noise generator
 ///   and the counters; the main thread only reads them.
 /// The render callback therefore never writes back a field another thread may
 /// have changed while it was rendering.
 final class RealtimeState: @unchecked Sendable {
+    /// Per-sample phasor rotations for the current tone.
+    private struct Rotations {
+        let left: Rotation
+        let right: Rotation
+        let envelope: Rotation
+
+        init(tone: ToneConfig, sampleRate: Double) {
+            left = Rotation(frequency: tone.carrier, sampleRate: sampleRate)
+            right = Rotation(frequency: tone.carrier + (tone.style == .binaural ? tone.beat : 0), sampleRate: sampleRate)
+            envelope = Rotation(frequency: tone.beat, sampleRate: sampleRate)
+        }
+    }
+
     private struct ToneConfig {
         var carrier: Double
         var beat: Double
@@ -58,9 +71,9 @@ final class RealtimeState: @unchecked Sendable {
     /// the swap is followed by the quick ramp back up. A request applied from
     /// silence (session start, resume) keeps the slow, gentle fade-in.
     private var switchDip = false
-    private var phaseLeft: Double = 0
-    private var phaseRight: Double = 0
-    private var envelopePhase: Double = 0
+    private var left = SineOscillator()
+    private var right = SineOscillator()
+    private var envelopeOscillator = SineOscillator()
     private var framesRendered: UInt64 = 0
     private var nanCount: UInt64 = 0
     private var clipCount: UInt64 = 0
@@ -153,12 +166,12 @@ final class RealtimeState: @unchecked Sendable {
         }
         var quickRamp = self.quickRamp
         var switchDip = self.switchDip
-        var phaseLeft = self.phaseLeft
-        var phaseRight = self.phaseRight
-        var envelopePhase = self.envelopePhase
+        var leftOscillator = self.left
+        var rightOscillator = self.right
+        var envelopeOscillator = self.envelopeOscillator
         lock.unlock()
 
-        let twoPi = 2.0 * Double.pi
+        var rotations = Rotations(tone: tone, sampleRate: sampleRate)
         let slowFadeFrames = Float(sampleRate * startStopFadeSeconds)
         let quickDownFrames = Float(sampleRate * crossfadeDownSeconds)
         let quickUpFrames = Float(sampleRate * crossfadeUpSeconds)
@@ -176,9 +189,10 @@ final class RealtimeState: @unchecked Sendable {
             if let pendingTone = pending, gain <= 0.001 {
                 tone = pendingTone
                 pending = nil
-                phaseLeft = 0
-                phaseRight = 0
-                envelopePhase = 0
+                rotations = Rotations(tone: tone, sampleRate: sampleRate)
+                leftOscillator.reset()
+                rightOscillator.reset()
+                envelopeOscillator.reset()
                 quickRamp = switchDip
                 switchDip = false
                 switchesApplied += 1
@@ -208,13 +222,10 @@ final class RealtimeState: @unchecked Sendable {
                 quickRamp = false
             }
 
-            let stepLeft = twoPi * tone.carrier / sampleRate
-            let stepRight = twoPi * (tone.carrier + (tone.style == .binaural ? tone.beat : 0)) / sampleRate
-            let envelopeStep = twoPi * tone.beat / sampleRate
-
+            let envelopeValue = envelopeOscillator.next(rotations.envelope)
             let envelope: Float
             if tone.style == .isochronic {
-                envelope = 0.45 + 0.55 * Float(0.5 + 0.5 * sin(envelopePhase))
+                envelope = 0.45 + 0.55 * Float(0.5 + 0.5 * envelopeValue)
             } else {
                 envelope = 1
             }
@@ -224,8 +235,8 @@ final class RealtimeState: @unchecked Sendable {
             let toneLevel = 0.36 * smoothedVolume
             let noiseLevel = 0.10 * smoothedVolume * smoothedNoise
             let toneSample = toneLevel * envelope * gain
-            let leftSample = Float(sin(phaseLeft)) * toneSample
-            let rightSample = Float(sin(phaseRight)) * toneSample
+            let leftSample = Float(leftOscillator.next(rotations.left)) * toneSample
+            let rightSample = Float(rightOscillator.next(rotations.right)) * toneSample
 
             var noise: Float = 0
             if smoothedNoise > 0.0001 {
@@ -254,13 +265,12 @@ final class RealtimeState: @unchecked Sendable {
             left[i] = max(-1, min(1, leftOutput))
             right[i] = max(-1, min(1, rightOutput))
 
-            phaseLeft += stepLeft
-            phaseRight += stepRight
-            envelopePhase += envelopeStep
-            if phaseLeft > twoPi { phaseLeft -= twoPi }
-            if phaseRight > twoPi { phaseRight -= twoPi }
-            if envelopePhase > twoPi { envelopePhase -= twoPi }
         }
+        // Keep the phasors on the unit circle (rounding drift is ~1e-16 per
+        // sample, so once per buffer is plenty).
+        leftOscillator.renormalize()
+        rightOscillator.renormalize()
+        envelopeOscillator.renormalize()
 
         lock.lock()
         self.tone = tone
@@ -277,9 +287,9 @@ final class RealtimeState: @unchecked Sendable {
         self.smoothedNoise = smoothedNoise
         self.quickRamp = quickRamp
         self.switchDip = switchDip
-        self.phaseLeft = phaseLeft
-        self.phaseRight = phaseRight
-        self.envelopePhase = envelopePhase
+        self.left = leftOscillator
+        self.right = rightOscillator
+        self.envelopeOscillator = envelopeOscillator
         self.framesRendered += UInt64(frameCount)
         self.nanCount += UInt64(nanCount)
         self.clipCount += UInt64(clipCount)
@@ -561,5 +571,51 @@ final class AudioEngine: ObservableObject {
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
         }
+    }
+}
+
+/// Phase advance per sample for one frequency, as a rotation.
+struct Rotation {
+    let cos: Double
+    let sin: Double
+
+    init(frequency: Double, sampleRate: Double) {
+        let step = 2 * Double.pi * frequency / sampleRate
+        cos = Foundation.cos(step)
+        sin = Foundation.sin(step)
+    }
+}
+
+/// Sine generator that rotates a unit phasor: one complex multiply per
+/// sample instead of a sin() call, phase-continuous across buffers. Starts
+/// at phase 0 (value 0) like a freshly reset phase accumulator.
+struct SineOscillator {
+    private var s: Double = 0 // sin(phase)
+    private var c: Double = 1 // cos(phase)
+
+    mutating func reset() {
+        s = 0
+        c = 1
+    }
+
+    /// The current sample, then advance one step.
+    @inline(__always)
+    mutating func next(_ rotation: Rotation) -> Double {
+        let value = s
+        let nextS = s * rotation.cos + c * rotation.sin
+        c = c * rotation.cos - s * rotation.sin
+        s = nextS
+        return value
+    }
+
+    /// Pull the phasor back onto the unit circle (call once per buffer).
+    mutating func renormalize() {
+        let magnitude = (s * s + c * c).squareRoot()
+        guard magnitude > 0 else {
+            reset()
+            return
+        }
+        s /= magnitude
+        c /= magnitude
     }
 }
