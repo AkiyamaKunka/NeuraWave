@@ -69,7 +69,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(status)
 
         if session.isPlaying, session.programTitle == nil {
-            let now = NSMenuItem(title: session.displayTitle, action: nil, keyEquivalent: "")
+            let now = NSMenuItem(title: session.sessionTitle, action: nil, keyEquivalent: "")
             now.isEnabled = false
             menu.addItem(now)
         }
