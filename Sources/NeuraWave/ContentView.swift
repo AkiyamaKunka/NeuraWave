@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var minutes: Int? = nil
     @State private var selectedProgram: FocusProgram?
     @ObservedObject private var session = SessionController.shared
+    private let settings = SettingsStore.standard
 
     private let columns = [
         GridItem(.flexible(), spacing: 8),
@@ -17,15 +18,13 @@ struct ContentView: View {
     private let durations = [15, 30, 45, 60, 90]
 
     init() {
-        let defaults = UserDefaults.standard
-        let savedPreset = defaults.string(forKey: "preset")
-        _selected = State(initialValue: BrainwavePreset.all.first { $0.id == savedPreset } ?? BrainwavePreset.byId("focus"))
-        _style = State(initialValue: ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural)
-        _volume = State(initialValue: VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double))
-        _noiseOn = State(initialValue: defaults.bool(forKey: "noise"))
-        let savedMinutes = defaults.integer(forKey: "minutes")
-        _minutes = State(initialValue: savedMinutes > 0 ? savedMinutes : nil)
-        _selectedProgram = State(initialValue: FocusProgram.all.first { $0.id == defaults.string(forKey: "program") })
+        let saved = settings
+        _selected = State(initialValue: saved.preset)
+        _style = State(initialValue: saved.style)
+        _volume = State(initialValue: saved.volume)
+        _noiseOn = State(initialValue: saved.noise)
+        _minutes = State(initialValue: saved.minutes)
+        _selectedProgram = State(initialValue: saved.program)
     }
 
     var body: some View {
@@ -49,11 +48,11 @@ struct ContentView: View {
         .padding(14)
         .frame(minWidth: 500, minHeight: 600)
         .onChange(of: volume) { _, newValue in
-            UserDefaults.standard.set(newValue, forKey: "volume")
+            settings.volume = newValue
             session.updateLive(volume: newValue, noiseEnabled: noiseOn)
         }
         .onChange(of: noiseOn) { _, newValue in
-            UserDefaults.standard.set(newValue, forKey: "noise")
+            settings.noise = newValue
             session.updateLive(volume: volume, noiseEnabled: newValue)
         }
         // Presets changed outside the grid (AirPods / Control Center skip,
@@ -70,7 +69,7 @@ struct ContentView: View {
               BrainwavePreset.all.contains(where: { $0.id == current.id }),
               current.id != selected.id else { return }
         selected = current
-        UserDefaults.standard.set(current.id, forKey: "preset")
+        settings.preset = current
     }
 
     @ViewBuilder
@@ -139,7 +138,7 @@ struct ContentView: View {
                 let isOn = selectedProgram?.id == program.id
                 Button {
                     selectedProgram = isOn ? nil : program
-                    UserDefaults.standard.set(selectedProgram?.id ?? "", forKey: "program")
+                    settings.program = selectedProgram
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(program.name)
@@ -187,7 +186,7 @@ struct ContentView: View {
         let isSelected = selected.id == preset.id
         return Button {
             selected = preset
-            UserDefaults.standard.set(preset.id, forKey: "preset")
+            settings.preset = preset
             session.switchPreset(
                 preset: preset,
                 style: style,
@@ -253,7 +252,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .onChange(of: style) { _, newStyle in
-                UserDefaults.standard.set(newStyle.rawValue, forKey: "style")
+                settings.style = newStyle
                 // Keep whatever is playing (a program step, or a preset
                 // skipped to from AirPods) and only change the style.
                 session.switchPreset(
@@ -316,14 +315,14 @@ struct ContentView: View {
                 Menu {
                     Button("No timer") {
                         minutes = nil
-                        UserDefaults.standard.set(0, forKey: "minutes")
+                        settings.minutes = nil
                         session.updateTimer(minutes: nil)
                     }
                     Divider()
                     ForEach(durations, id: \.self) { duration in
                         Button("\(duration) minutes") {
                             minutes = duration
-                            UserDefaults.standard.set(duration, forKey: "minutes")
+                            settings.minutes = duration
                             session.updateTimer(minutes: duration)
                         }
                     }

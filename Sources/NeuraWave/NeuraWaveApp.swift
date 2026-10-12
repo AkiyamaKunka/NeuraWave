@@ -166,9 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Default-on launch-at-login, applied once on first run. After that the
     /// menu bar toggle is the source of truth, so turning it off sticks.
     static func registerLoginItemIfNeeded() {
-        let defaults = UserDefaults.standard
-        let key = "didApplyDefaultLoginItem"
-        guard !defaults.bool(forKey: key) else { return }
+        let settings = SettingsStore.standard
+        guard !settings.didApplyDefaultLoginItem else { return }
         let service = SMAppService.mainApp
         if service.status != .enabled {
             try? service.register()
@@ -176,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Only remember once it took (a first run from a translocated DMG
         // copy can fail); otherwise try again next launch.
         if service.status == .enabled || service.status == .requiresApproval {
-            defaults.set(true, forKey: key)
+            settings.didApplyDefaultLoginItem = true
         }
     }
 

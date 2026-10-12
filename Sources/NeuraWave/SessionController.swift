@@ -19,6 +19,7 @@ final class SessionController: ObservableObject {
     @Published private(set) var currentPreset: BrainwavePreset = BrainwavePreset.byId("focus")
 
     let engine = AudioEngine()
+    var settings = SettingsStore.standard
     private let nowPlaying = NowPlayingController.shared
     @Published private(set) var sessionTitle = "NeuraWave"
     private var timer: Timer?
@@ -98,17 +99,16 @@ final class SessionController: ObservableObject {
     }
 
     private func startFromSavedSettings() {
-        let defaults = UserDefaults.standard
-        let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
-        let volume = VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double)
-        let noise = defaults.bool(forKey: "noise")
-        if let program = FocusProgram.all.first(where: { $0.id == defaults.string(forKey: "program") }) {
-            startProgram(program, style: style, volume: volume, withNoise: noise)
-            return
+        if let program = settings.program {
+            startProgram(program, style: settings.style, volume: settings.volume, withNoise: settings.noise)
+        } else {
+            startSaved(preset: settings.preset)
         }
-        let preset = BrainwavePreset.all.first { $0.id == defaults.string(forKey: "preset") } ?? BrainwavePreset.byId("focus")
-        let minutes = defaults.integer(forKey: "minutes")
-        start(preset: preset, style: style, volume: volume, withNoise: noise, minutes: minutes > 0 ? minutes : nil)
+    }
+
+    /// `preset` with the saved style, volume, noise and timer.
+    private func startSaved(preset: BrainwavePreset) {
+        start(preset: preset, style: settings.style, volume: settings.volume, withNoise: settings.noise, minutes: settings.minutes)
     }
 
     /// The playing single preset becomes the saved choice, whoever picked it
@@ -116,7 +116,7 @@ final class SessionController: ObservableObject {
     /// Start agree with what you last heard.
     private func rememberPreset(_ preset: BrainwavePreset) {
         guard !isSelfTesting, BrainwavePreset.all.contains(where: { $0.id == preset.id }) else { return }
-        UserDefaults.standard.set(preset.id, forKey: "preset")
+        settings.preset = preset
     }
 
     /// Menu bar "Presets" submenu: switch the playing preset in place, or
@@ -129,11 +129,7 @@ final class SessionController: ObservableObject {
             switchPreset(preset: preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.withNoise)
             return
         }
-        let defaults = UserDefaults.standard
-        let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
-        let volume = VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double)
-        let minutes = defaults.integer(forKey: "minutes")
-        start(preset: preset, style: style, volume: volume, withNoise: defaults.bool(forKey: "noise"), minutes: minutes > 0 ? minutes : nil)
+        startSaved(preset: preset)
     }
 
     /// Runs a timed program: presets auto-advance through the click-free
