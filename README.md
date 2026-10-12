@@ -78,7 +78,10 @@ frequency rationale lives in [RESEARCH.md](RESEARCH.md).
 ```bash
 swift build                          # debug build
 bash scripts/package-app.sh release  # assembles build/NeuraWave.app
+bash scripts/make-dmg.sh             # dist/NeuraWave-<version>.dmg
 ```
+
+What changed between versions is in [CHANGELOG.md](CHANGELOG.md).
 
 ## 🗂 Code map
 
