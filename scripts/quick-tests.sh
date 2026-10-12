@@ -5,11 +5,23 @@
 #
 #   bash scripts/quick-tests.sh                 # after `swift build`
 #   bash scripts/quick-tests.sh --autotest-volume 0   # extra flags for every run (silent)
+#
+# Environment: NEURAWAVE_BIN (default: the debug build) to test another
+# binary such as the packaged app; QUICK_TESTS_LOGDIR to keep the logs.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/.build/debug/NeuraWave"
-LOGDIR="$(mktemp -d)"
+BIN="${NEURAWAVE_BIN:-$ROOT/.build/debug/NeuraWave}"
+LOGDIR="${QUICK_TESTS_LOGDIR:-$(mktemp -d)}"
+mkdir -p "$LOGDIR"
+# Saved settings live under the bundle id for a packaged app, and under the
+# executable name for the bare debug build.
+PLIST="$(dirname "$BIN")/../Info.plist"
+if [ -f "$PLIST" ]; then
+  DOMAIN="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")"
+else
+  DOMAIN="$(basename "$BIN")"
+fi
 EXTRA=("$@")
 # Now Playing coverage only on CI: locally it would take Control Center over
 # from whatever you are listening to.
@@ -34,10 +46,10 @@ SCENARIOS=(
   "timer-pause|--autotest-seconds 75 --autotest-cycle 100 --autotest-timer-minutes 1 --autotest-pause-at 10 --autotest-resume-at 15|TIMER_STOP_VERIFIED at 6[4-9]s"
 )
 
-# Self-tests must never change your saved settings. The debug binary keeps
-# them in the "NeuraWave" defaults domain; snapshot it to compare after.
+# Self-tests must never change your saved settings: snapshot them to
+# compare after.
 # (Running a debug build of the app yourself meanwhile would also trip this.)
-settings_before="$(defaults read NeuraWave 2>/dev/null | grep -vE 'NSWindow|NSStatusItem' || true)"
+settings_before="$(defaults read "$DOMAIN" 2>/dev/null | grep -vE 'NSWindow|NSStatusItem' || true)"
 
 for scenario in "${SCENARIOS[@]}"; do
   IFS='|' read -r name args _ <<< "$scenario"
@@ -60,7 +72,7 @@ for scenario in "${SCENARIOS[@]}"; do
     failed=1
   fi
 done
-settings_after="$(defaults read NeuraWave 2>/dev/null | grep -vE 'NSWindow|NSStatusItem' || true)"
+settings_after="$(defaults read "$DOMAIN" 2>/dev/null | grep -vE 'NSWindow|NSStatusItem' || true)"
 if [ "$settings_before" = "$settings_after" ]; then
   echo "PASS settings-untouched"
 else
