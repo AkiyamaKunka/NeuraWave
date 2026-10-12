@@ -15,6 +15,7 @@ struct WaveformView: View {
 
     var body: some View {
         WaveLayers(isPlaying: isPlaying, isPaused: isPaused, beat: beat, color: NSColor(color))
+            .accessibilityHidden(true) // decorative; the status text says what's playing
             .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.16)))
             .overlay {
                 if !isPlaying {
