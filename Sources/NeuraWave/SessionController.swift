@@ -42,6 +42,8 @@ final class SessionController: ObservableObject {
     private var clock: SessionClock?
     private var program: FocusProgram?
     private var ticker: Timer?
+    /// The last-30-seconds ease-out is currently lowering the volume.
+    private var isEndingFadeApplied = false
 
     private static let audioFailureMessage = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
 
@@ -265,7 +267,6 @@ final class SessionController: ObservableObject {
     /// volume eases down to silence (then the regular stop fade follows), so
     /// the end of a Deep Sleep timer doesn't wake you.
     static let endingFadeSeconds: TimeInterval = 30
-    private var isEndingFadeApplied = false
 
     private func applyEndingFade(remaining: TimeInterval?) {
         guard let playback else { return }
