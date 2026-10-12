@@ -85,6 +85,7 @@ final class AudioEngine {
             engine.connect(node, to: engine.mainMixerNode, format: format)
             sourceNode = node
             nodeSampleRate = sampleRate
+            requestLargeIOBuffer()
         }
 
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
@@ -240,6 +241,23 @@ final class AudioEngine {
             isPlaying = false
             onOutputFailure?()
         }
+    }
+
+    /// Steady tones don't need low latency: a ~43 ms IO buffer (2048 frames
+    /// at 48 kHz) instead of the default ~11 ms means a quarter of the audio
+    /// wakeups, for less CPU and energy. Switches and pauses are fades of
+    /// 60 ms or more anyway. Best effort: the device may clamp or refuse it.
+    private func requestLargeIOBuffer() {
+        guard let unit = engine.outputNode.audioUnit else { return }
+        var frames: UInt32 = 2048
+        AudioUnitSetProperty(
+            unit,
+            kAudioDevicePropertyBufferFrameSize,
+            kAudioUnitScope_Global,
+            0,
+            &frames,
+            UInt32(MemoryLayout<UInt32>.size)
+        )
     }
 
     private func beginKeepAwake() {
