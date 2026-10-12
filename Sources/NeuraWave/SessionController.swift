@@ -162,11 +162,10 @@ final class SessionController: ObservableObject {
 
     func switchPreset(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool) {
         guard isPlaying else { return }
-        audio.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
         playback = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
-        if isEndingFadeApplied, let clock {
-            applyEndingFade(remaining: clock.remaining(at: now())) // stay eased out
-        }
+        // Already at the eased-out level during the final fade, so no buffer
+        // ever targets the full volume in between.
+        audio.switchTo(preset: preset, style: style, volume: Float(audibleVolume(volume)), withNoise: withNoise)
         currentPreset = preset
         if program == nil {
             // During a program the title stays "Program · Step".
@@ -268,6 +267,13 @@ final class SessionController: ObservableObject {
     /// the end of a Deep Sleep timer doesn't wake you.
     static let endingFadeSeconds: TimeInterval = 30
 
+    /// `volume` as it should sound right now: eased out near the end.
+    private func audibleVolume(_ volume: Double) -> Double {
+        guard let clock, let remaining = clock.remaining(at: now()),
+              remaining < Self.endingFadeSeconds else { return volume }
+        return volume * max(0, remaining / Self.endingFadeSeconds)
+    }
+
     private func applyEndingFade(remaining: TimeInterval?) {
         guard let playback else { return }
         if let remaining, remaining < Self.endingFadeSeconds {
@@ -299,7 +305,7 @@ final class SessionController: ObservableObject {
         programTitle = Self.title(of: program, step: index)
         sessionTitle = programTitle ?? program.name
         if let playback {
-            audio.switchTo(preset: preset, style: playback.style, volume: Float(playback.volume), withNoise: playback.noise)
+            audio.switchTo(preset: preset, style: playback.style, volume: Float(audibleVolume(playback.volume)), withNoise: playback.noise)
             self.playback?.preset = preset
             currentPreset = preset
         }

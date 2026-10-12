@@ -43,6 +43,7 @@ SCENARIOS=(
   "quick-resume|--autotest-seconds 12 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 6|AUTOTEST_RESUME"
   "device-change|--autotest-seconds 14 --autotest-cycle 50 --autotest-device-change-at 4|DEVICE_CHECK ok"
   "program|--autotest-seconds 45 --autotest-cycle 30 --autotest-program-seconds 45 --autotest-pause-at 10 --autotest-resume-at 15|PROGRAM_STEP 3/3"
+  "timer-switch|--autotest-seconds 70 --autotest-cycle 5 --autotest-timer-minutes 1|TIMER_STOP_VERIFIED at 6[0-4]s"
   "timer-pause|--autotest-seconds 75 --autotest-cycle 100 --autotest-timer-minutes 1 --autotest-pause-at 10 --autotest-resume-at 15|TIMER_STOP_VERIFIED at 6[4-9]s"
 )
 

@@ -11,6 +11,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var cancellables = Set<AnyCancellable>()
     /// The "Remaining" line while the menu is open, kept ticking live.
     private weak var countdownItem: NSMenuItem?
+    private var isMenuOpen = false
 
     init(session: SessionController, showWindow: @escaping () -> Void) {
         self.session = session
@@ -43,6 +44,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 item.title = Self.countdownTitle(remaining)
             }
             .store(in: &cancellables)
+        // If the session starts, stops or pauses while the menu is open (timer
+        // runs out, AirPods), rebuild it so it never shows stale items.
+        session.$isPlaying.combineLatest(session.$isPaused)
+            .dropFirst()
+            .sink { [weak self] _, _ in
+                DispatchQueue.main.async {
+                    guard let self, self.isMenuOpen, let menu = self.statusItem.menu else { return }
+                    self.rebuild(menu)
+                }
+            }
+            .store(in: &cancellables)
 
         let menu = NSMenu()
         menu.delegate = self
@@ -58,7 +70,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         rebuild(menu)
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
+    }
+
     func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
         countdownItem = nil
     }
 
