@@ -47,8 +47,10 @@ final class FakeNowPlaying: NowPlayingPublishing {
     private(set) var paused = false
     private(set) var skipEnabled = true
     private(set) var cleared = 0
+    private(set) var updates = 0
 
     func update(title: String, elapsed: TimeInterval, duration: TimeInterval?, playing: Bool, paused: Bool) {
+        updates += 1
         self.title = title
         self.duration = duration
         self.paused = paused

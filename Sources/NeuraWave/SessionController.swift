@@ -42,8 +42,6 @@ final class SessionController: ObservableObject {
     private var clock: SessionClock?
     private var program: FocusProgram?
     private var ticker: Timer?
-    /// Whole-second throttle for Now Playing metadata pushes.
-    private var lastPushedSecond = -1
 
     private static let audioFailureMessage = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
 
@@ -182,7 +180,6 @@ final class SessionController: ObservableObject {
         self.clock = clock
         publishRemaining(clock.remaining(at: now))
         updateTicker()
-        lastPushedSecond = -1
         pushNowPlaying()
     }
 
@@ -208,7 +205,6 @@ final class SessionController: ObservableObject {
         programStep = nil
         programTitle = nil
         isRunningProgram = false
-        lastPushedSecond = -1
         if publishesNowPlaying {
             nowPlaying.setSkipEnabled(true)
             nowPlaying.clear()
@@ -251,11 +247,6 @@ final class SessionController: ObservableObject {
             advanceProgram(program, elapsed: clock.elapsed(at: now))
         }
         publishRemaining(clock.remaining(at: now))
-        let second = Int(clock.elapsed(at: now))
-        if second != lastPushedSecond {
-            lastPushedSecond = second
-            pushNowPlaying()
-        }
     }
 
     /// The countdown ticks twice a second but its value changes once a second;
@@ -280,6 +271,7 @@ final class SessionController: ObservableObject {
             self.playback?.preset = preset
             currentPreset = preset
         }
+        pushNowPlaying()
         selfTest?.programStepped(to: index, of: program.steps.count, preset: preset)
     }
 
@@ -361,6 +353,9 @@ final class SessionController: ObservableObject {
         selfTest?.options.publishesNowPlaying ?? true
     }
 
+    /// Publishes title, elapsed time, duration and rate. Called on state
+    /// changes only: with a playback rate set, macOS advances the elapsed
+    /// time itself, so per-second pushes would just be extra IPC.
     private func pushNowPlaying() {
         guard isPlaying, publishesNowPlaying, let clock else { return }
         let elapsed = clock.elapsed(at: now())

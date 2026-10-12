@@ -178,4 +178,18 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertFalse(session.isPlaying)
         XCTAssertNotNil(session.lastError)
     }
+
+    // MARK: Now Playing
+
+    func testNowPlayingIsPushedOnChangesNotEveryTick() {
+        session.startProgram(program("study"), style: .binaural, volume: 0.4, withNoise: false)
+        let afterStart = nowPlaying.updates
+        for _ in 0..<120 { advance(1) } // two quiet minutes
+        XCTAssertEqual(nowPlaying.updates, afterStart, "macOS extrapolates elapsed time itself")
+        advance(10 * 60) // next program step
+        XCTAssertEqual(nowPlaying.updates, afterStart + 1)
+        XCTAssertTrue(nowPlaying.title?.contains("Deep Focus") ?? false)
+        session.pausePlayback()
+        XCTAssertEqual(nowPlaying.updates, afterStart + 2)
+    }
 }
