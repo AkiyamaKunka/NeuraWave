@@ -93,7 +93,7 @@ bash scripts/package-app.sh release  # assembles build/NeuraWave.app
 | `RealtimeRenderer.swift` | The audio-thread renderer: lock-safe state handoff, phasor oscillators, fades, noise |
 | `ContentView.swift`, `WindowSections.swift`, `WaveformView.swift` | The window |
 | `MenuBarController.swift`, `NowPlayingController.swift` | Menu bar item; AirPods / Control Center commands |
-| `LoginItem.swift` | Launch at Login and the main window helpers |
+| `LoginItem.swift`, `MainWindow.swift` | Launch at Login; showing, hiding and reopening the main window |
 | `AutoTest.swift`, `DeveloperTools.swift` | Hidden self-test mode, `--screenshot`, window probe |
 
 ## 🧪 Testing
