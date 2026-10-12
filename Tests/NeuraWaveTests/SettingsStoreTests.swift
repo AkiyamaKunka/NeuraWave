@@ -72,4 +72,18 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.style, .binaural)
         XCTAssertEqual(store.volume, 1)
     }
+
+    func testVolumeCurveMigrationKeepsTheSameLoudnessOnce() {
+        defaults.set(0.25, forKey: "volume") // old linear amplitude
+        let store = SettingsStore(defaults: defaults)
+        store.migrateVolumeCurveIfNeeded()
+        XCTAssertEqual(store.volume, 0.5, accuracy: 1e-9, "√0.25: same amplitude on the new curve")
+        XCTAssertEqual(Double(SessionController.amplitude(store.volume)), 0.25, accuracy: 1e-6)
+        store.migrateVolumeCurveIfNeeded() // second launch: untouched
+        XCTAssertEqual(store.volume, 0.5, accuracy: 1e-9)
+    }
+
+    func testFreshInstallDefaultKeepsTheOriginalLoudness() {
+        XCTAssertEqual(Double(SessionController.amplitude(VolumeLevel.defaultValue)), 0.385, accuracy: 0.002)
+    }
 }

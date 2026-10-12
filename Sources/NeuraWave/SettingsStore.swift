@@ -15,6 +15,18 @@ struct SettingsStore {
         static let minutes = "minutes"
         static let program = "program"
         static let didApplyDefaultLoginItem = "didApplyDefaultLoginItem"
+        static let volumeCurve = "volumeCurve"
+    }
+
+    /// Saved volumes used to be linear amplitudes; now they are positions on
+    /// the squared (perceptual) curve. Convert once so an existing user's
+    /// level sounds exactly as loud as before.
+    func migrateVolumeCurveIfNeeded() {
+        guard defaults.integer(forKey: Key.volumeCurve) < 2 else { return }
+        if let linear = defaults.object(forKey: Key.volume) as? Double, linear.isFinite, linear > 0 {
+            defaults.set(VolumeLevel.sanitized(linear.squareRoot()), forKey: Key.volume)
+        }
+        defaults.set(2, forKey: Key.volumeCurve)
     }
 
     static var standard: SettingsStore { SettingsStore(defaults: .standard) }

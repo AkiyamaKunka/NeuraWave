@@ -74,11 +74,12 @@ final class SessionControllerTests: XCTestCase {
         advance(29)
         XCTAssertFalse(audio.log.contains { $0.hasPrefix("update") }, "full level until the last 30 s")
         advance(16) // 15 s left: half way down
-        XCTAssertEqual(audio.log.last, "update 0.2")
+        let amp = SessionController.amplitude
+        XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.4) * 0.5, accuracy: 0.0001)
         session.updateLive(volume: 0.8, noiseEnabled: false)
-        XCTAssertEqual(audio.log.last, "update 0.4", "a new level keeps easing out")
+        XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.8) * 0.5, accuracy: 0.0001, "a new level keeps easing out")
         session.updateTimer(minutes: 15)
-        XCTAssertEqual(audio.log.last, "update 0.8", "extending the timer restores the level")
+        XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.8), accuracy: 0.0001, "extending the timer restores the level")
     }
 
     func testChangingTheTimerMidSessionAppliesNow() {

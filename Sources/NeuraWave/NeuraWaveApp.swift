@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         launchedAtLogin = LoginItem.isHandlingLoginLaunch()
+        // Before any window reads settings. Self-tests never touch them.
+        if AutoTestOptions(arguments: ProcessInfo.processInfo.arguments) == nil {
+            SettingsStore.standard.migrateVolumeCurveIfNeeded()
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
