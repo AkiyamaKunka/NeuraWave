@@ -1,5 +1,4 @@
 import Combine
-import Darwin
 import Foundation
 import SwiftUI
 
@@ -34,32 +33,9 @@ final class SessionController: ObservableObject {
     private var lastPushedSecond = -1
     private var program: FocusProgram?
     private var programStartedAt = Date()
-    private var autotestProgram = false
-    private var autotestRunning = false
-    private var autotestTimer: Timer?
-    private var autotestConfigIndex = 0
-    private var autotestStartedAt = Date()
-    private var autotestLastCycle = Date()
-    private var autotestTotal = 0
-    private var autotestCycle = 30
-    private var autotestTimerMinutes: Int?
-    private var autotestStopAt = 0
-    private var autotestStopPerformed = false
-    private var autotestTimerVerified = false
-    private var autotestVolume: Double = 0.08
-    private var autotestPauseAt = 0
-    private var autotestResumeAt = 0
-    private var autotestPausePerformed = false
-    private var autotestResumePerformed = false
-    private var autotestArguments: [String] = []
-    private var autotestDeviceChangeAt = 0
-    private var autotestDeviceChangePerformed = false
-
-    private struct AutoTestConfig {
-        let preset: BrainwavePreset
-        let style: ToneStyle
-        let noise: Bool
-    }
+    /// Set while the hidden self-test drives this session (see AutoTest.swift).
+    weak var selfTest: AutoTestRunner?
+    private var isSelfTesting: Bool { selfTest != nil }
 
     private static let audioFailureMessage = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
 
@@ -75,16 +51,6 @@ final class SessionController: ObservableObject {
         }
     }
 
-    private static let autotestConfigs: [AutoTestConfig] = {
-        var configs: [AutoTestConfig] = []
-        for style in ToneStyle.allCases {
-            for preset in BrainwavePreset.all {
-                configs.append(AutoTestConfig(preset: preset, style: style, noise: false))
-                configs.append(AutoTestConfig(preset: preset, style: style, noise: true))
-            }
-        }
-        return configs
-    }()
 
     func start(
         preset: BrainwavePreset,
@@ -149,7 +115,7 @@ final class SessionController: ObservableObject {
     /// (window, menu bar, AirPods skip), so a reopened window and the next
     /// Start agree with what you last heard.
     private func rememberPreset(_ preset: BrainwavePreset) {
-        guard !autotestRunning, BrainwavePreset.all.contains(where: { $0.id == preset.id }) else { return }
+        guard !isSelfTesting, BrainwavePreset.all.contains(where: { $0.id == preset.id }) else { return }
         UserDefaults.standard.set(preset.id, forKey: "preset")
     }
 
@@ -336,9 +302,7 @@ final class SessionController: ObservableObject {
                 lastStartConfig = (preset, cfg.style, cfg.volume, cfg.withNoise, nil)
                 currentPreset = preset
             }
-            if autotestRunning {
-                logAutoTest("PROGRAM_STEP \(index + 1)/\(program.steps.count) \(preset.name) -> \(autotestSnapshot())")
-            }
+            selfTest?.programStepped(to: index, of: program.steps.count, preset: preset)
         }
         remainingSeconds = Int(ceil(program.totalSeconds - elapsed))
         let second = Int(elapsed)
@@ -443,7 +407,7 @@ final class SessionController: ObservableObject {
     /// it over from whatever you're listening to) unless asked to cover it
     /// with --autotest-now-playing.
     private var publishesNowPlaying: Bool {
-        !autotestRunning || autotestArguments.contains("--autotest-now-playing")
+        selfTest?.options.publishesNowPlaying ?? true
     }
 
     private func pushNowPlaying() {
@@ -463,211 +427,15 @@ final class SessionController: ObservableObject {
         }
     }
 
-    // MARK: - Automated self-test (launched with --autotest)
+    // MARK: - Self-test
 
     /// Remote commands (AirPods, Control Center, or macOS handing Now Playing
     /// to another app) arrive asynchronously from outside. During a self-test
     /// they would make results depend on whatever else the Mac is doing, so
     /// they are logged and ignored.
     func shouldHandleRemoteCommand(_ name: String) -> Bool {
-        guard autotestRunning else { return true }
-        logAutoTest("REMOTE_COMMAND_IGNORED \(name)")
+        guard let selfTest else { return true }
+        selfTest.remoteCommandIgnored(name)
         return false
-    }
-
-    func runAutoTest(
-        totalSeconds: Int,
-        cycleSeconds: Int,
-        timerMinutes: Int?,
-        stopAtSeconds: Int,
-        volume: Double,
-        programSeconds: Int,
-        arguments: [String] = []
-    ) {
-        guard !autotestRunning else { return }
-        setvbuf(stdout, nil, _IOLBF, 0)
-        autotestArguments = arguments
-        autotestRunning = true
-        autotestConfigIndex = 0
-        autotestStartedAt = Date()
-        autotestLastCycle = Date()
-        autotestTotal = totalSeconds
-        autotestCycle = max(2, cycleSeconds)
-        autotestTimerMinutes = timerMinutes
-        autotestStopAt = stopAtSeconds
-        autotestStopPerformed = false
-        autotestTimerVerified = false
-        autotestVolume = volume
-        autotestProgram = programSeconds > 0
-        autotestPauseAt = intArgument(arguments, name: "--autotest-pause-at", fallback: 0)
-        autotestResumeAt = intArgument(arguments, name: "--autotest-resume-at", fallback: 0)
-        autotestPausePerformed = false
-        autotestResumePerformed = false
-        autotestDeviceChangeAt = intArgument(arguments, name: "--autotest-device-change-at", fallback: 0)
-        autotestDeviceChangePerformed = false
-
-        let first = Self.autotestConfigs[0]
-        if autotestProgram {
-            let third = max(3, programSeconds / 3)
-            let prog = FocusProgram(
-                id: "autotest",
-                name: "Autotest Program",
-                detail: "",
-                steps: [
-                    FocusProgram.ProgramStep(preset: BrainwavePreset.all.first { $0.id == "relax" }!, seconds: TimeInterval(third)),
-                    FocusProgram.ProgramStep(preset: BrainwavePreset.all.first { $0.id == "focus" }!, seconds: TimeInterval(third)),
-                    FocusProgram.ProgramStep(preset: BrainwavePreset.all.first { $0.id == "peak" }!, seconds: TimeInterval(programSeconds - 2 * third))
-                ]
-            )
-            startProgram(prog, style: .binaural, volume: volume, withNoise: true)
-            logAutoTest("START_PROGRAM -> \(autotestSnapshot())")
-        } else if let minutes = timerMinutes {
-            start(
-                preset: first.preset,
-                style: first.style,
-                volume: volume,
-                withNoise: first.noise,
-                minutes: minutes
-            )
-            logAutoTest("START_WITH_TIMER \(minutes)m -> \(autotestSnapshot())")
-        } else {
-            autotestApplyConfig(volume: volume)
-            logAutoTest("START -> \(autotestSnapshot())")
-        }
-
-        autotestTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.autotestTick()
-            }
-        }
-    }
-
-    private func autotestTick() {
-        let elapsed = Date().timeIntervalSince(autotestStartedAt)
-
-        if autotestTimerMinutes != nil, !autotestTimerVerified, !isPlaying, !autotestStopPerformed, !autotestProgram {
-            autotestTimerVerified = true
-            logAutoTest("TIMER_STOP_VERIFIED at \(Int(elapsed))s -> \(autotestSnapshot())")
-            if elapsed < Double(autotestTotal) - 8 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    guard let self else { return }
-                    self.autotestApplyConfig(volume: self.autotestVolume)
-                    self.logAutoTest("RESTART_AFTER_TIMER -> \(self.autotestSnapshot())")
-                }
-            }
-        }
-
-        if autotestStopAt > 0, !autotestStopPerformed, !autotestProgram, Int(elapsed) >= autotestStopAt {
-            autotestStopPerformed = true
-            logAutoTest("MANUAL_STOP at \(autotestStopAt)s -> \(autotestSnapshot())")
-            stop()
-            if elapsed < Double(autotestTotal) - 8 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    guard let self else { return }
-                    self.autotestConfigIndex += 1
-                    self.autotestApplyConfig(volume: self.autotestVolume)
-                    self.logAutoTest("RESTART_AFTER_STOP -> \(self.autotestSnapshot())")
-                }
-            }
-        }
-
-        // Preset cycling continues after stop/restart so the whole matrix is
-        // exercised across the run (previously it stopped after a manual stop).
-        if elapsed - autotestLastCycle.timeIntervalSince(autotestStartedAt) >= Double(autotestCycle),
-           isPlaying, !isPaused, !autotestProgram {
-            autotestLastCycle = Date()
-            autotestConfigIndex += 1
-            let config = Self.autotestConfigs[autotestConfigIndex % Self.autotestConfigs.count]
-            if autotestConfigIndex % 3 == 2 {
-                let newVolume = Float(autotestVolume * (0.7 + 0.15 * Double(autotestConfigIndex % 4)))
-                engine.update(volume: newVolume, noiseEnabled: config.noise)
-                logAutoTest("LIVE_UPDATE volume=\(newVolume) noise=\(config.noise)")
-            } else {
-                autotestApplyConfig(volume: autotestVolume)
-            }
-            logAutoTest("cycle diag -> \(autotestSnapshot())")
-        }
-
-        if autotestPauseAt > 0, !autotestPausePerformed, Int(elapsed) >= autotestPauseAt, isPlaying, !isPaused {
-            autotestPausePerformed = true
-            pausePlayback()
-            logAutoTest("AUTOTEST_PAUSE at \(Int(elapsed))s -> \(autotestSnapshot())")
-        }
-
-        if autotestResumeAt > 0, !autotestResumePerformed, Int(elapsed) >= autotestResumeAt, isPlaying, isPaused {
-            autotestResumePerformed = true
-            resumePlayback()
-            logAutoTest("AUTOTEST_RESUME at \(Int(elapsed))s -> \(autotestSnapshot())")
-        }
-
-        if autotestDeviceChangeAt > 0, !autotestDeviceChangePerformed, Int(elapsed) >= autotestDeviceChangeAt, isPlaying {
-            autotestDeviceChangePerformed = true
-            // A burst, like a real device switch: must coalesce to one rebuild.
-            engine.simulateConfigurationChange()
-            engine.simulateConfigurationChange()
-            engine.simulateConfigurationChange()
-            logAutoTest("AUTOTEST_DEVICE_CHANGE at \(Int(elapsed))s -> \(autotestSnapshot())")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
-                guard let self else { return }
-                let ok = self.isPlaying && self.engine.deviceRebuilds == 1 && self.engine.diagnostics.gain > 0.9
-                self.logAutoTest("DEVICE_CHECK \(ok ? "ok" : "FAIL") rebuilds=\(self.engine.deviceRebuilds) -> \(self.autotestSnapshot())")
-            }
-        }
-
-        if elapsed >= Double(autotestTotal) {
-            autotestTimer?.invalidate()
-            autotestTimer = nil
-            stop()
-            logAutoTest("AUTOTEST_COMPLETE total=\(Int(elapsed))s -> \(autotestSnapshot())")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                // Every requested preset/style change must reach the render
-                // thread (a lost update here once dropped ~30% of switches).
-                if let self {
-                    let (requested, coalesced) = self.engine.switchRequests
-                    let applied = self.engine.diagnostics.switches
-                    let ok = requested == applied + coalesced
-                    self.logAutoTest("SWITCH_CHECK \(ok ? "ok" : "MISMATCH") requested=\(requested) applied=\(applied) coalesced=\(coalesced)")
-                }
-                exit(0)
-            }
-        }
-    }
-
-    private func autotestApplyConfig(volume: Double) {
-        let config = Self.autotestConfigs[autotestConfigIndex % Self.autotestConfigs.count]
-        if engine.isPlaying {
-            // Exercises the live crossfade-switch path.
-            engine.switchTo(preset: config.preset, style: config.style, volume: Float(volume), withNoise: config.noise)
-        } else {
-            _ = engine.start(preset: config.preset, style: config.style, volume: Float(volume), withNoise: config.noise)
-        }
-        isPlaying = engine.isPlaying
-        logAutoTest("switch -> \(config.preset.name)/\(config.style.rawValue)/noise=\(config.noise) volume=\(volume)")
-    }
-
-    private func autotestSnapshot() -> String {
-        let diagnostics = engine.diagnostics
-        return "frames=\(diagnostics.frames) nan=\(diagnostics.nan) clips=\(diagnostics.clips) switches=\(diagnostics.switches) gain=\(String(format: "%.2f", diagnostics.gain)) playing=\(isPlaying)"
-    }
-
-    private func intArgument(_ arguments: [String], name: String, fallback: Int) -> Int {
-        guard let raw = argumentValue(arguments, name: name) else { return fallback }
-        return Int(raw) ?? fallback
-    }
-
-    private func argumentValue(_ arguments: [String], name: String) -> String? {
-        if let equalsForm = arguments.first(where: { $0.hasPrefix(name + "=") }) {
-            return String(equalsForm.dropFirst(name.count + 1))
-        }
-        if let index = arguments.firstIndex(of: name), index + 1 < arguments.count {
-            return arguments[index + 1]
-        }
-        return nil
-    }
-
-    private func logAutoTest(_ message: String) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        print("[autotest \(formatter.string(from: Date()))] \(message)")
     }
 }

@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var openMainWindow: (() -> Void)?
 
     private var menuBar: MenuBarController?
+    private var autoTestRunner: AutoTestRunner?
     private var launchedAtLogin = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -37,7 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // callback; check here as well as in willFinish to be safe.
         launchedAtLogin = launchedAtLogin || Self.wasLaunchedAsLoginItem()
         let arguments = ProcessInfo.processInfo.arguments
-        let isAutotest = arguments.contains("--autotest")
+        let autoTestOptions = AutoTestOptions(arguments: arguments)
+        let isAutotest = autoTestOptions != nil
         let launchedAtLogin = !isAutotest && self.launchedAtLogin
 
         if launchedAtLogin {
@@ -96,23 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Self-test mode starts here rather than in the view's onAppear so it
         // runs even when no window is ever presented (e.g. display asleep).
-        if isAutotest {
-            let total = Self.intArgument(arguments, name: "--autotest-seconds", fallback: 1800)
-            let cycle = Self.intArgument(arguments, name: "--autotest-cycle", fallback: 30)
-            let timerMinutes = Self.intArgument(arguments, name: "--autotest-timer-minutes", fallback: 0)
-            let stopAt = Self.intArgument(arguments, name: "--autotest-stop-at", fallback: 0)
-            let volume = Self.doubleArgument(arguments, name: "--autotest-volume", fallback: 0.08)
-            let programSeconds = Self.intArgument(arguments, name: "--autotest-program-seconds", fallback: 0)
-            SessionController.shared.runAutoTest(
-                totalSeconds: total,
-                cycleSeconds: cycle,
-                timerMinutes: timerMinutes > 0 ? timerMinutes : nil,
-                stopAtSeconds: stopAt,
-                volume: volume,
-                programSeconds: programSeconds,
-                arguments: arguments
-            )
-            if arguments.contains("--autotest-window-check") {
+        if let options = autoTestOptions {
+            let runner = AutoTestRunner(session: .shared, options: options)
+            autoTestRunner = runner
+            runner.start()
+            if options.windowCheck {
                 Self.runWindowCheck()
             }
         }
@@ -221,26 +211,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(1)
         }
         exit(0)
-    }
-
-    private static func intArgument(_ arguments: [String], name: String, fallback: Int) -> Int {
-        guard let raw = argumentValue(arguments, name: name) else { return fallback }
-        return Int(raw) ?? fallback
-    }
-
-    private static func doubleArgument(_ arguments: [String], name: String, fallback: Double) -> Double {
-        guard let raw = argumentValue(arguments, name: name) else { return fallback }
-        return Double(raw) ?? fallback
-    }
-
-    private static func argumentValue(_ arguments: [String], name: String) -> String? {
-        if let equalsForm = arguments.first(where: { $0.hasPrefix(name + "=") }) {
-            return String(equalsForm.dropFirst(name.count + 1))
-        }
-        if let index = arguments.firstIndex(of: name), index + 1 < arguments.count {
-            return arguments[index + 1]
-        }
-        return nil
     }
 }
 
