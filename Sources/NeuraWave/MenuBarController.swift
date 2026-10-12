@@ -75,7 +75,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
 
         if session.isPlaying, let remaining = session.remainingSeconds {
-            let countdown = NSMenuItem(title: "Remaining \(Self.format(remaining))", action: nil, keyEquivalent: "")
+            let countdown = NSMenuItem(title: "Remaining \(TimeFormat.clock(remaining))", action: nil, keyEquivalent: "")
             countdown.isEnabled = false
             menu.addItem(countdown)
         }
@@ -168,9 +168,5 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func quitApp() {
         // AppDelegate fades out and stops the session before terminating.
         NSApp.terminate(nil)
-    }
-
-    private static func format(_ seconds: Int) -> String {
-        String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }
