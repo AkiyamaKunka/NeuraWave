@@ -17,6 +17,8 @@ struct WaveformView: View {
         WaveLayers(isPlaying: isPlaying, isPaused: isPaused, beat: beat, color: NSColor(color))
             .accessibilityHidden(true) // decorative; the status text says what's playing
             .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.16)))
+            // Keep the wave peaks inside the panel's rounded corners.
+            .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay {
                 if !isPlaying {
                     Text("Press Start to play")
@@ -73,6 +75,19 @@ final class WaveLayersView: NSView {
             wave.lineJoin = .round
             layer?.addSublayer(wave)
         }
+        updateContentsScale()
+    }
+
+    // Hand-made sublayers don't inherit the backing scale; without this the
+    // thin strokes would rasterize at 1x on Retina displays.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateContentsScale()
+    }
+
+    private func updateContentsScale() {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        for wave in waves { wave.contentsScale = scale }
     }
 
     @available(*, unavailable)
@@ -93,8 +108,11 @@ final class WaveLayersView: NSView {
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (index, wave) in waves.enumerated() {
-            wave.strokeColor = color.withAlphaComponent(CGFloat(Self.opacities[index])).cgColor
+        // Resolve the (dynamic) color for this view's light/dark appearance.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            for (index, wave) in waves.enumerated() {
+                wave.strokeColor = color.withAlphaComponent(CGFloat(Self.opacities[index])).cgColor
+            }
         }
         if shapeChanged { rebuildPaths() }
         CATransaction.commit()
@@ -122,10 +140,10 @@ final class WaveLayersView: NSView {
     /// Each path is one wavelength wider than the view so sliding it left
     /// by exactly one wavelength loops seamlessly.
     private func rebuildPaths() {
-        builtSize = bounds.size
         let width = bounds.width
         let height = bounds.height
         guard width > 0, height > 0 else { return }
+        builtSize = bounds.size
         let laneAmplitude = height * 0.16
         let amplitude = isPlaying ? laneAmplitude : 1.5
         let samplesPerWavelength = 80
@@ -158,8 +176,13 @@ final class WaveLayersView: NSView {
             }
             if wave.animation(forKey: Self.slideKey) == nil
                 || animatedBeat != beat || animatedWavelength != wavelength {
+                // Restart at the same point in the cycle, so resizing the
+                // window or changing preset doesn't snap the wave back.
+                let fraction = cycleFraction(of: wave)
                 resetTiming(wave)
-                wave.add(slideAnimation(), forKey: Self.slideKey)
+                let slide = slideAnimation()
+                slide.timeOffset = fraction * slide.duration
+                wave.add(slide, forKey: Self.slideKey)
             }
             if isPaused, wave.speed != 0 {
                 // Freeze the presentation where it is.
@@ -181,6 +204,16 @@ final class WaveLayersView: NSView {
 
     private var animatedBeat: Double = 0
     private var animatedWavelength: CGFloat = 0
+
+    /// Where the wave currently is in its one-wavelength slide, 0..<1.
+    private func cycleFraction(of wave: CALayer) -> Double {
+        guard animatedWavelength > 0,
+              let offset = wave.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat else {
+            return 0
+        }
+        let fraction = Double(-offset / animatedWavelength)
+        return min(max(fraction, 0), 0.999)
+    }
 
     private func resetTiming(_ wave: CALayer) {
         wave.speed = 1
