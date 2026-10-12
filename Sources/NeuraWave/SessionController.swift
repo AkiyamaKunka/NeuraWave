@@ -21,8 +21,10 @@ final class SessionController: ObservableObject {
     /// What the session is called right now (preset, or "Program · Step").
     @Published private(set) var sessionTitle = "NeuraWave"
 
-    let engine = AudioEngine()
-    var settings = SettingsStore.standard
+    let audio: AudioOutput
+    /// The real engine when running for real (self-tests and diagnostics).
+    var engine: AudioEngine? { audio as? AudioEngine }
+    var settings: SettingsStore
     /// Set while the hidden self-test drives this session (see AutoTest.swift).
     weak var selfTest: AutoTestRunner?
 
@@ -34,7 +36,8 @@ final class SessionController: ObservableObject {
         var noise: Bool
     }
 
-    private let nowPlaying = NowPlayingController.shared
+    private let nowPlaying: NowPlayingPublishing
+    private let now: () -> Date
     private var playback: PlaybackConfig?
     private var clock: SessionClock?
     private var program: FocusProgram?
@@ -44,10 +47,19 @@ final class SessionController: ObservableObject {
 
     private static let audioFailureMessage = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
 
-    init() {
+    init(
+        audio: AudioOutput? = nil,
+        nowPlaying: NowPlayingPublishing? = nil,
+        settings: SettingsStore = .standard,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.audio = audio ?? AudioEngine()
+        self.nowPlaying = nowPlaying ?? NowPlayingController.shared
+        self.settings = settings
+        self.now = now
         // The output device went away (or changed) and couldn't be restarted:
         // stop rather than claim to be playing silence.
-        engine.onOutputFailure = { [weak self] in
+        self.audio.onOutputFailure = { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.isPlaying else { return }
                 self.stop()
@@ -93,14 +105,14 @@ final class SessionController: ObservableObject {
     private func begin(_ config: PlaybackConfig, duration: TimeInterval?) -> Bool {
         stop()
         playback = config
-        guard engine.start(preset: config.preset, style: config.style, volume: Float(config.volume), withNoise: config.noise) else {
+        guard audio.start(preset: config.preset, style: config.style, volume: Float(config.volume), withNoise: config.noise) else {
             lastError = Self.audioFailureMessage
             return false
         }
         isPlaying = true
         isPaused = false
         lastError = nil
-        clock = SessionClock(startedAt: Date(), duration: duration)
+        clock = SessionClock(startedAt: now(), duration: duration)
         remainingSeconds = duration.map { Int($0) }
         updateTicker()
         return true
@@ -149,7 +161,7 @@ final class SessionController: ObservableObject {
 
     func switchPreset(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool) {
         guard isPlaying else { return }
-        engine.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
+        audio.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
         playback = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
         currentPreset = preset
         if program == nil {
@@ -165,7 +177,7 @@ final class SessionController: ObservableObject {
     /// next Start. Programs have their own schedule and ignore this.
     func updateTimer(minutes: Int?) {
         guard isPlaying, program == nil, var clock else { return }
-        let now = Date()
+        let now = self.now()
         clock.setRemaining(minutes.map { Double($0) * 60 }, at: now)
         self.clock = clock
         publishRemaining(clock.remaining(at: now))
@@ -177,7 +189,7 @@ final class SessionController: ObservableObject {
     /// Immediate volume/noise change (no crossfade needed). Also fine while
     /// stopped: the engine keeps the level for the next start.
     func updateLive(volume: Double, noiseEnabled: Bool) {
-        engine.update(volume: Float(volume), noiseEnabled: noiseEnabled)
+        audio.update(volume: Float(volume), noiseEnabled: noiseEnabled)
         playback?.volume = volume
         playback?.noise = noiseEnabled
     }
@@ -187,7 +199,7 @@ final class SessionController: ObservableObject {
     func stop() {
         ticker?.invalidate()
         ticker = nil
-        engine.stop()
+        audio.stop()
         isPlaying = false
         isPaused = false
         remainingSeconds = nil
@@ -227,9 +239,10 @@ final class SessionController: ObservableObject {
         ticker = newTicker
     }
 
-    private func tick() {
+    /// Advance timers/programs (driven by the ticker; tests call it directly).
+    func tick() {
         guard isPlaying, !isPaused, let clock else { return }
-        let now = Date()
+        let now = self.now()
         if clock.isFinished(at: now) {
             stop() // fade out; stop() also clears timer and program state
             return
@@ -263,7 +276,7 @@ final class SessionController: ObservableObject {
         programTitle = Self.title(of: program, step: index)
         sessionTitle = programTitle ?? program.name
         if let playback {
-            engine.switchTo(preset: preset, style: playback.style, volume: Float(playback.volume), withNoise: playback.noise)
+            audio.switchTo(preset: preset, style: playback.style, volume: Float(playback.volume), withNoise: playback.noise)
             self.playback?.preset = preset
             currentPreset = preset
         }
@@ -280,16 +293,16 @@ final class SessionController: ObservableObject {
     func pausePlayback() {
         guard isPlaying, !isPaused else { return }
         isPaused = true
-        clock?.pause(at: Date())
-        engine.pause()
+        clock?.pause(at: now())
+        audio.pause()
         pushNowPlaying()
     }
 
     func resumePlayback() {
         guard isPlaying, isPaused else { return }
         isPaused = false
-        clock?.resume(at: Date())
-        guard engine.restartAfterPause() else {
+        clock?.resume(at: now())
+        guard audio.restartAfterPause() else {
             stop()
             lastError = Self.audioFailureMessage
             return
@@ -350,7 +363,7 @@ final class SessionController: ObservableObject {
 
     private func pushNowPlaying() {
         guard isPlaying, publishesNowPlaying, let clock else { return }
-        let elapsed = clock.elapsed(at: Date())
+        let elapsed = clock.elapsed(at: now())
         nowPlaying.update(
             title: sessionTitle,
             elapsed: clock.duration.map { min(elapsed, $0) } ?? elapsed,

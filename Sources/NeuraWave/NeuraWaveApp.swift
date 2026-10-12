@@ -132,8 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// mid-cycle — an audible click. Glide the level to zero first.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let session = SessionController.shared
-        guard session.engine.isAudible else { return .terminateNow }
-        session.engine.update(volume: 0, noiseEnabled: false)
+        guard session.audio.isAudible else { return .terminateNow }
+        session.audio.update(volume: 0, noiseEnabled: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             session.stop()
             sender.reply(toApplicationShouldTerminate: true)

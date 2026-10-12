@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class MenuBarTests: XCTestCase {
     func testIdleMenu() {
-        let session = SessionController()
+        let session = SessionController(audio: FakeAudio(), nowPlaying: FakeNowPlaying())
         let controller = MenuBarController(session: session, showWindow: {})
         let menu = NSMenu()
         controller.menuNeedsUpdate(menu)

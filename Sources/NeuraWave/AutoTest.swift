@@ -92,7 +92,8 @@ final class AutoTestRunner {
 
     let options: AutoTestOptions
     private let session: SessionController
-    private var engine: AudioEngine { session.engine }
+    /// Self-tests always drive the real engine.
+    private var engine: AudioEngine { session.engine! }
     private var timer: Timer?
     private var configIndex = 0
     private var startedAt = Date()
