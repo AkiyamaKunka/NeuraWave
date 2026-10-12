@@ -30,6 +30,7 @@
 - New `scripts/make-dmg.sh`: builds a drag-to-Applications DMG (refuses to overwrite an existing one).
 
 ### Changed
+- **Volume slider feels even:** the slider now follows loudness (a squared amplitude curve), with much finer control at the quiet end. Saved volumes are converted once, so they sound exactly as loud as before.
 - **Audio rendering:** about 17× cheaper (phasor oscillators instead of per-sample `sin()`); render cost is about 0.03% of real time.
 - **Code structure:** split into small, documented types:
   - `SessionClock`, `SettingsStore`;
