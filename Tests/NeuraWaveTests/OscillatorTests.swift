@@ -34,4 +34,22 @@ final class OscillatorTests: XCTestCase {
         XCTAssertEqual(oscillator.next(rotation), 0)
         XCTAssertEqual(oscillator.next(rotation), sin(2 * Double.pi * 1000 / 48_000), accuracy: 1e-12)
     }
+
+    func testNoiseIsBoundedCenteredAndNotStuck() {
+        var noise = NoiseGenerator()
+        var sum = 0.0
+        var lowest: Float = 0
+        var highest: Float = 0
+        let count = 48_000 * 60
+        for n in 0..<count {
+            let value = noise.next()
+            XCTAssertTrue(value.isFinite && abs(value) <= 1)
+            sum += Double(value)
+            lowest = min(lowest, value)
+            highest = max(highest, value)
+            if n % 512 == 511 { noise.resync() }
+        }
+        XCTAssertLessThan(abs(sum / Double(count)), 0.01, "no DC offset")
+        XCTAssertGreaterThan(highest - lowest, 0.5, "actually varies")
+    }
 }

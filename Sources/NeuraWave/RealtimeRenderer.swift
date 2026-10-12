@@ -61,25 +61,12 @@ final class RealtimeState: @unchecked Sendable {
     private var nanCount: UInt64 = 0
     private var clipCount: UInt64 = 0
     private var switchCount: UInt64 = 0
-    /// Smoothed noise source: a fixed, preallocated buffer (no allocation on
-    /// the audio thread) with a running sum and a cheap inline PRNG.
-    private static let noiseRowCount = 16
-    private let noiseRows = UnsafeMutablePointer<Float>.allocate(capacity: noiseRowCount)
-    private var noiseSum: Float = 0
-    private var rngState: UInt32 = 0x9E37_79B9
+    private var noiseGenerator = NoiseGenerator()
 
     // Gain-ramp durations: slow fade for start/stop, quick dip for live switches.
     private let startStopFadeSeconds = 2.0
     private let crossfadeDownSeconds = 0.06
     private let crossfadeUpSeconds = 0.15
-
-    init() {
-        noiseRows.initialize(repeating: 0, count: Self.noiseRowCount)
-    }
-
-    deinit {
-        noiseRows.deallocate()
-    }
 
     /// Request a new configuration. The render thread applies it once the
     /// output is silent: if audio is audible it first dips to silence, swaps
@@ -158,7 +145,7 @@ final class RealtimeState: @unchecked Sendable {
         let slowFadeFrames = Float(sampleRate * startStopFadeSeconds)
         let quickDownFrames = Float(sampleRate * crossfadeDownSeconds)
         let quickUpFrames = Float(sampleRate * crossfadeUpSeconds)
-        let rowCount = Self.noiseRowCount
+        var noiseGenerator = self.noiseGenerator // render-owned: no lock needed
         // ~25 ms one-pole glide toward the requested levels.
         let smoothing = Float(1 - exp(-1 / (sampleRate * 0.025)))
         let noiseTarget: Float = noiseEnabled ? 1 : 0
@@ -221,18 +208,7 @@ final class RealtimeState: @unchecked Sendable {
             let leftSample = Float(leftOscillator.next(rotations.left)) * toneSample
             let rightSample = Float(rightOscillator.next(rotations.right)) * toneSample
 
-            var noise: Float = 0
-            if smoothedNoise > 0.0001 {
-                // xorshift32: allocation- and syscall-free, fine for noise.
-                rngState ^= rngState << 13
-                rngState ^= rngState >> 17
-                rngState ^= rngState << 5
-                let row = Int(rngState % UInt32(rowCount))
-                let value = Float(rngState >> 8) / Float(1 << 23) - 1
-                noiseSum += value - noiseRows[row]
-                noiseRows[row] = value
-                noise = noiseSum / Float(rowCount)
-            }
+            let noise: Float = smoothedNoise > 0.0001 ? noiseGenerator.next() : 0
 
             let noiseSample = noise * noiseLevel * gain
             var leftOutput = leftSample + noiseSample
@@ -254,6 +230,7 @@ final class RealtimeState: @unchecked Sendable {
         leftOscillator.renormalize()
         rightOscillator.renormalize()
         envelopeOscillator.renormalize()
+        noiseGenerator.resync()
 
         lock.lock()
         self.tone = tone
@@ -268,6 +245,7 @@ final class RealtimeState: @unchecked Sendable {
         self.gain = gain
         self.smoothedVolume = smoothedVolume
         self.smoothedNoise = smoothedNoise
+        self.noiseGenerator = noiseGenerator
         self.quickRamp = quickRamp
         self.switchDip = switchDip
         self.left = leftOscillator
@@ -336,5 +314,34 @@ struct SineOscillator {
         }
         s /= magnitude
         c /= magnitude
+    }
+}
+
+/// Soft ambient noise: the average of 16 random rows, one of which is
+/// replaced per sample (a cheap low-pass "Voss" style generator), driven by
+/// an xorshift PRNG. A plain value type: no allocation, no locks, no system
+/// calls, so it is safe on the realtime audio thread.
+struct NoiseGenerator {
+    private var rows = SIMD16<Float>(repeating: 0)
+    private var sum: Float = 0
+    private var state: UInt32 = 0x9E37_79B9
+
+    /// Next sample in roughly [-1, 1] (mostly far smaller, being an average).
+    @inline(__always)
+    mutating func next() -> Float {
+        state ^= state << 13
+        state ^= state >> 17
+        state ^= state << 5
+        let row = Int(state & 15)
+        let value = Float(state >> 8) / Float(1 << 23) - 1
+        sum += value - rows[row]
+        rows[row] = value
+        return sum / 16
+    }
+
+    /// Recompute the running sum exactly (call once per buffer) so float
+    /// rounding can't build up a DC offset over hours of playback.
+    mutating func resync() {
+        sum = rows.sum()
     }
 }
