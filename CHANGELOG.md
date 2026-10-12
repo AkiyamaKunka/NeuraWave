@@ -30,6 +30,7 @@
 - New `scripts/make-dmg.sh`: builds a drag-to-Applications DMG (refuses to overwrite an existing one).
 
 ### Changed
+- **Isochronic pulses are full depth:** the tone now swells from silence to full on every beat (100% modulation, as in the 40 Hz research), loudness-matched to the old 45–100% pulses.
 - **Audio rendering:** about 17× cheaper (phasor oscillators instead of per-sample `sin()`); render cost is about 0.03% of real time.
 - **Code structure:** split into small, documented types:
   - `SessionClock`, `SettingsStore`;
