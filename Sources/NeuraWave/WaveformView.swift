@@ -8,7 +8,7 @@ struct WaveformView: View {
     let color: Color
     /// False while the window is hidden, minimized or fully covered. A
     /// hidden window (e.g. after a login launch, playing from the menu bar)
-    /// would otherwise keep redrawing at 30 fps for nobody (~7% CPU).
+    /// would otherwise keep redrawing at 30 fps for nobody (≈9% CPU).
     @State private var isOnScreen = true
 
     var body: some View {
@@ -104,7 +104,9 @@ private struct WindowOcclusionReader: NSViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.report() }
             }
-            report()
+            // Defer: this runs inside SwiftUI's view update, where writing
+            // state directly is not allowed.
+            DispatchQueue.main.async { [weak self] in self?.report() }
         }
 
         private func report() {

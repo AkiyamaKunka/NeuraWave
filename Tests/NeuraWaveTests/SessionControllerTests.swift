@@ -15,6 +15,8 @@ final class SessionControllerTests: XCTestCase {
         nowPlaying = FakeNowPlaying()
         suiteName = "NeuraWaveTests.Session"
         settings = SettingsStore(defaults: UserDefaults(suiteName: suiteName)!)
+        // Fixed name (no plist per run); clear leftovers from a killed run.
+        settings.defaults.removePersistentDomain(forName: suiteName)
         clock = Date(timeIntervalSinceReferenceDate: 0)
         session = SessionController(audio: audio, nowPlaying: nowPlaying, settings: settings) { [unowned self] in self.clock }
     }

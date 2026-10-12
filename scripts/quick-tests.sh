@@ -36,6 +36,7 @@ SCENARIOS=(
 
 # Self-tests must never change your saved settings. The debug binary keeps
 # them in the "NeuraWave" defaults domain; snapshot it to compare after.
+# (Running a debug build of the app yourself meanwhile would also trip this.)
 settings_before="$(defaults read NeuraWave 2>/dev/null | grep -vE 'NSWindow|NSStatusItem' || true)"
 
 for scenario in "${SCENARIOS[@]}"; do

@@ -94,7 +94,8 @@ final class SessionController: ObservableObject {
         currentPreset = first
         programStep = (0, program.steps.count)
         programTitle = Self.title(of: program, step: 0)
-        sessionTitle = program.name
+        // Same "Program · Step" form as later steps.
+        sessionTitle = programTitle ?? program.name
         pushNowPlaying()
     }
 

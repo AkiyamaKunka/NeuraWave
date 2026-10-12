@@ -8,6 +8,8 @@ final class SettingsStoreTests: XCTestCase {
     override func setUp() {
         suiteName = "NeuraWaveTests.SettingsStore"
         defaults = UserDefaults(suiteName: suiteName)
+        // Fixed name (no plist per run); clear leftovers from a killed run.
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     override func tearDown() {
