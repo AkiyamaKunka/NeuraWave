@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import ServiceManagement
 
 /// Menu bar item so a session keeps running (and can be controlled) after the
 /// window is closed. The window is optional; the sound is not.
@@ -91,13 +90,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func loginItem() -> NSMenuItem {
         let item = action("Launch at Login", #selector(toggleLoginItem))
-        switch SMAppService.mainApp.status {
-        case .enabled:
+        switch LoginItem.state {
+        case .on:
             item.state = .on
-        case .requiresApproval:
+        case .needsApproval:
             item.state = .mixed
             item.title = "Launch at Login (approve in System Settings)"
-        default:
+        case .off:
             item.state = .off
         }
         return item
@@ -135,17 +134,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleLoginItem() {
-        let service = SMAppService.mainApp
-        if service.status == .enabled {
-            try? service.unregister()
-        } else {
-            try? service.register()
-            // macOS can require the user to approve login items; without
-            // this the toggle just silently stays off.
-            if service.status == .requiresApproval {
-                SMAppService.openSystemSettingsLoginItems()
-            }
-        }
+        LoginItem.toggle()
     }
 
     @objc private func quitApp() {
