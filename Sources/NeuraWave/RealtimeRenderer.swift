@@ -7,30 +7,11 @@ import os
 /// - The main thread owns `running`, `volume`, `noiseEnabled` and
 ///   `pendingTone`; the render thread only reads them (and *takes*
 ///   `pendingTone` under the lock).
-/// - The render thread owns `tone`, `gain`, the oscillators, the noise generator
-///   and the counters; the main thread only reads them.
+/// - The render thread owns the voice, fader, level smoother, noise
+///   generator and counters; the main thread only reads diagnostics.
 /// The render callback therefore never writes back a field another thread may
 /// have changed while it was rendering.
 final class RealtimeState: @unchecked Sendable {
-    /// Per-sample phasor rotations for the current tone.
-    private struct Rotations {
-        let left: Rotation
-        let right: Rotation
-        let envelope: Rotation
-
-        init(tone: ToneConfig, sampleRate: Double) {
-            left = Rotation(frequency: tone.carrier, sampleRate: sampleRate)
-            right = Rotation(frequency: tone.carrier + (tone.style == .binaural ? tone.beat : 0), sampleRate: sampleRate)
-            envelope = Rotation(frequency: tone.beat, sampleRate: sampleRate)
-        }
-    }
-
-    private struct ToneConfig {
-        var carrier: Double
-        var beat: Double
-        var style: ToneStyle
-    }
-
     private let lock = OSAllocatedUnfairLock()
     // Main-thread owned.
     private var pendingTone: ToneConfig?
@@ -42,31 +23,14 @@ final class RealtimeState: @unchecked Sendable {
     /// them (two changes within one crossfade dip). Intentional, not lost.
     private var coalescedCount: UInt64 = 0
     // Render-thread owned.
-    private var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
-    private var gain: Float = 0
-    /// Per-sample smoothed levels, so dragging the volume slider or toggling
-    /// noise glides instead of stepping (no zipper noise / clicks).
-    private var smoothedVolume: Float = 0.385
-    private var smoothedNoise: Float = 0
-    private var levelsPrimed = false
-    private var quickRamp = false
-    /// True while the gain is being dipped to silence for a live switch, so
-    /// the swap is followed by the quick ramp back up. A request applied from
-    /// silence (session start, resume) keeps the slow, gentle fade-in.
-    private var switchDip = false
-    private var left = SineOscillator()
-    private var right = SineOscillator()
-    private var envelopeOscillator = SineOscillator()
+    private var voice = Voice()
+    private var fader = GainFader()
+    private var levels: LevelSmoother?
+    private var noiseGenerator = NoiseGenerator()
     private var framesRendered: UInt64 = 0
     private var nanCount: UInt64 = 0
     private var clipCount: UInt64 = 0
     private var switchCount: UInt64 = 0
-    private var noiseGenerator = NoiseGenerator()
-
-    // Gain-ramp durations: slow fade for start/stop, quick dip for live switches.
-    private let startStopFadeSeconds = 2.0
-    private let crossfadeDownSeconds = 0.06
-    private let crossfadeUpSeconds = 0.15
 
     /// Request a new configuration. The render thread applies it once the
     /// output is silent: if audio is audible it first dips to silence, swaps
@@ -98,11 +62,7 @@ final class RealtimeState: @unchecked Sendable {
     /// Called only while no render callback can run (node detached), so a
     /// rebuilt node fades in from silence instead of starting at full level.
     func resetGain() {
-        lock.withLock {
-            gain = 0
-            quickRamp = false
-            switchDip = false
-        }
+        lock.withLock { fader = GainFader() }
     }
 
     func render(
@@ -117,102 +77,48 @@ final class RealtimeState: @unchecked Sendable {
         }
 
         lock.lock()
-        var tone = self.tone
         // Take ownership of the pending request; if it is not applied in this
         // buffer it is handed back below (unless a newer one arrived).
-        var pending = self.pendingTone
-        self.pendingTone = nil
+        var pending = pendingTone
+        pendingTone = nil
         let running = self.running
         let volume = self.volume
         let noiseEnabled = self.noiseEnabled
-        var gain = self.gain
-        var smoothedVolume = self.smoothedVolume
-        var smoothedNoise = self.smoothedNoise
-        if !self.levelsPrimed {
-            // First buffer ever: start at the requested level, don't glide in.
-            smoothedVolume = volume
-            smoothedNoise = noiseEnabled ? 1 : 0
-            self.levelsPrimed = true
-        }
-        var quickRamp = self.quickRamp
-        var switchDip = self.switchDip
-        var leftOscillator = self.left
-        var rightOscillator = self.right
-        var envelopeOscillator = self.envelopeOscillator
         lock.unlock()
 
-        var rotations = Rotations(tone: tone, sampleRate: sampleRate)
-        let slowFadeFrames = Float(sampleRate * startStopFadeSeconds)
-        let quickDownFrames = Float(sampleRate * crossfadeDownSeconds)
-        let quickUpFrames = Float(sampleRate * crossfadeUpSeconds)
-        var noiseGenerator = self.noiseGenerator // render-owned: no lock needed
-        // ~25 ms one-pole glide toward the requested levels.
-        let smoothing = Float(1 - exp(-1 / (sampleRate * 0.025)))
+        // Render-owned state: work on local copies, write back at the end.
+        var voice = self.voice
+        var fader = self.fader
+        // First buffer ever: start at the requested levels, don't glide in.
+        var levels = self.levels ?? LevelSmoother(volume: volume, noise: noiseEnabled ? 1 : 0)
+        var noiseGenerator = self.noiseGenerator
+        voice.prepare(sampleRate: sampleRate)
+        let fades = GainFader.Rates(sampleRate: sampleRate)
+        let smoothing = LevelSmoother.coefficient(sampleRate: sampleRate)
         let noiseTarget: Float = noiseEnabled ? 1 : 0
         var nanCount = 0
         var clipCount = 0
         var switchesApplied = 0
 
         for i in 0..<frameCount {
-            // Crossfade state machine: when a pending config exists, ramp to
-            // silence first; once silent, swap parameters and head back up.
-            if let pendingTone = pending, gain <= 0.001 {
-                tone = pendingTone
+            // Crossfade: with a request pending, dip to silence first; once
+            // silent, retune (phases restart inaudibly) and head back up.
+            if let next = pending, fader.isSilent {
+                voice.retune(to: next, sampleRate: sampleRate)
+                fader.didSwitch()
                 pending = nil
-                rotations = Rotations(tone: tone, sampleRate: sampleRate)
-                leftOscillator.reset()
-                rightOscillator.reset()
-                envelopeOscillator.reset()
-                quickRamp = switchDip
-                switchDip = false
                 switchesApplied += 1
             }
+            let gain = fader.advance(running: running, switching: pending != nil, rates: fades)
+            levels.advance(volume: volume, noise: noiseTarget, coefficient: smoothing)
 
-            var target: Float = running ? 1 : 0
-            if pending != nil && gain > 0.001 {
-                target = 0
-                switchDip = true
-            }
+            let (leftTone, rightTone) = voice.next()
+            let toneSample = 0.36 * levels.volume * gain
+            let noise: Float = levels.noise > 0.0001 ? noiseGenerator.next() : 0
+            let noiseSample = noise * 0.10 * levels.volume * levels.noise * gain
 
-            let fadeFrames: Float
-            if pending != nil {
-                fadeFrames = quickDownFrames
-            } else if quickRamp {
-                fadeFrames = quickUpFrames
-            } else {
-                fadeFrames = slowFadeFrames
-            }
-            let step = 1.0 / max(fadeFrames, 1)
-            if gain < target {
-                gain = min(target, gain + step)
-            } else if gain > target {
-                gain = max(target, gain - step)
-            }
-            if abs(gain - target) <= step {
-                quickRamp = false
-            }
-
-            let envelopeValue = envelopeOscillator.next(rotations.envelope)
-            let envelope: Float
-            if tone.style == .isochronic {
-                envelope = 0.45 + 0.55 * Float(0.5 + 0.5 * envelopeValue)
-            } else {
-                envelope = 1
-            }
-
-            smoothedVolume += (volume - smoothedVolume) * smoothing
-            smoothedNoise += (noiseTarget - smoothedNoise) * smoothing
-            let toneLevel = 0.36 * smoothedVolume
-            let noiseLevel = 0.10 * smoothedVolume * smoothedNoise
-            let toneSample = toneLevel * envelope * gain
-            let leftSample = Float(leftOscillator.next(rotations.left)) * toneSample
-            let rightSample = Float(rightOscillator.next(rotations.right)) * toneSample
-
-            let noise: Float = smoothedNoise > 0.0001 ? noiseGenerator.next() : 0
-
-            let noiseSample = noise * noiseLevel * gain
-            var leftOutput = leftSample + noiseSample
-            var rightOutput = rightSample + noiseSample
+            var leftOutput = leftTone * toneSample + noiseSample
+            var rightOutput = rightTone * toneSample + noiseSample
             if leftOutput.isNaN || rightOutput.isNaN {
                 nanCount += 1
                 if leftOutput.isNaN { leftOutput = 0 }
@@ -223,38 +129,27 @@ final class RealtimeState: @unchecked Sendable {
             }
             left[i] = max(-1, min(1, leftOutput))
             right[i] = max(-1, min(1, rightOutput))
-
         }
-        // Keep the phasors on the unit circle (rounding drift is ~1e-16 per
-        // sample, so once per buffer is plenty).
-        leftOscillator.renormalize()
-        rightOscillator.renormalize()
-        envelopeOscillator.renormalize()
+        voice.renormalize()
         noiseGenerator.resync()
 
         lock.lock()
-        self.tone = tone
-        if self.pendingTone == nil {
+        if pendingTone == nil {
             // Still mid-dip: keep the request for the next buffer.
-            self.pendingTone = pending
+            pendingTone = pending
         } else if pending != nil {
             // A request that arrived during this render is newer and wins;
             // the one this render was still holding is superseded.
-            self.coalescedCount += 1
+            coalescedCount += 1
         }
-        self.gain = gain
-        self.smoothedVolume = smoothedVolume
-        self.smoothedNoise = smoothedNoise
+        self.voice = voice
+        self.fader = fader
+        self.levels = levels
         self.noiseGenerator = noiseGenerator
-        self.quickRamp = quickRamp
-        self.switchDip = switchDip
-        self.left = leftOscillator
-        self.right = rightOscillator
-        self.envelopeOscillator = envelopeOscillator
-        self.framesRendered += UInt64(frameCount)
+        framesRendered += UInt64(frameCount)
         self.nanCount += UInt64(nanCount)
         self.clipCount += UInt64(clipCount)
-        self.switchCount += UInt64(switchesApplied)
+        switchCount += UInt64(switchesApplied)
         lock.unlock()
     }
 
@@ -267,7 +162,147 @@ final class RealtimeState: @unchecked Sendable {
     func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
         lock.lock()
         defer { lock.unlock() }
-        return (framesRendered, nanCount, clipCount, switchCount, gain)
+        return (framesRendered, nanCount, clipCount, switchCount, fader.gain)
+    }
+}
+
+/// The tone being played.
+struct ToneConfig {
+    var carrier: Double
+    var beat: Double
+    var style: ToneStyle
+
+    /// Right-ear frequency: offset by the beat for binaural, same as the
+    /// left for isochronic (which pulses instead).
+    var rightFrequency: Double {
+        carrier + (style == .binaural ? beat : 0)
+    }
+}
+
+/// What is sounding: the tone and its three oscillators (left carrier, right
+/// carrier, isochronic pulse envelope). Produces the unscaled stereo tone.
+struct Voice {
+    private(set) var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
+    private var left = SineOscillator()
+    private var right = SineOscillator()
+    private var envelope = SineOscillator()
+    private var rotations: (left: Rotation, right: Rotation, envelope: Rotation)?
+    private var preparedSampleRate: Double = 0
+
+    /// Make sure the per-sample rotations match `sampleRate` (cheap no-op
+    /// unless the device rate or tone changed).
+    mutating func prepare(sampleRate: Double) {
+        guard rotations == nil || preparedSampleRate != sampleRate else { return }
+        preparedSampleRate = sampleRate
+        rotations = (
+            Rotation(frequency: tone.carrier, sampleRate: sampleRate),
+            Rotation(frequency: tone.rightFrequency, sampleRate: sampleRate),
+            Rotation(frequency: tone.beat, sampleRate: sampleRate)
+        )
+    }
+
+    /// Switch tone, restarting every oscillator at phase 0. Call while silent.
+    mutating func retune(to tone: ToneConfig, sampleRate: Double) {
+        self.tone = tone
+        rotations = nil
+        prepare(sampleRate: sampleRate)
+        left.reset()
+        right.reset()
+        envelope.reset()
+    }
+
+    /// Next stereo tone sample in [-1, 1] (before volume and fades).
+    @inline(__always)
+    mutating func next() -> (left: Float, right: Float) {
+        guard let rotations else { return (0, 0) }
+        let pulse = envelope.next(rotations.envelope)
+        // Isochronic: the tone pulses between 45% and 100% at the beat rate.
+        let level: Float = tone.style == .isochronic ? 0.45 + 0.55 * Float(0.5 + 0.5 * pulse) : 1
+        return (Float(left.next(rotations.left)) * level, Float(right.next(rotations.right)) * level)
+    }
+
+    /// Keep the oscillators exact (call once per buffer).
+    mutating func renormalize() {
+        left.renormalize()
+        right.renormalize()
+        envelope.renormalize()
+    }
+}
+
+/// The start/stop fade and the click-free switch dip, one sample at a time.
+///
+/// - Start/stop and pause/resume fade slowly (2 s).
+/// - A live switch dips to silence quickly (60 ms), the tone is swapped while
+///   silent, then it comes back quickly (150 ms).
+/// - A tone applied from silence (session start) keeps the slow fade-in.
+struct GainFader {
+    struct Rates {
+        let slowStep: Float
+        let dipStep: Float
+        let recoverStep: Float
+
+        init(sampleRate: Double) {
+            slowStep = 1 / max(Float(sampleRate * 2.0), 1)
+            dipStep = 1 / max(Float(sampleRate * 0.06), 1)
+            recoverStep = 1 / max(Float(sampleRate * 0.15), 1)
+        }
+    }
+
+    private(set) var gain: Float = 0
+    /// Ramp up quickly: the last switch was a dip from audible.
+    private var quickRecovery = false
+    /// Currently dipping for a live switch (gain was audible when it began).
+    private var dipping = false
+
+    var isSilent: Bool { gain <= 0.001 }
+
+    /// The pending tone was applied while silent.
+    mutating func didSwitch() {
+        quickRecovery = dipping
+        dipping = false
+    }
+
+    /// Advance one sample toward silence (stopped/paused, or dipping for a
+    /// switch) or full level; returns the new gain.
+    @inline(__always)
+    mutating func advance(running: Bool, switching: Bool, rates: Rates) -> Float {
+        var target: Float = running ? 1 : 0
+        if switching && !isSilent {
+            target = 0
+            dipping = true
+        }
+        let step = switching ? rates.dipStep : (quickRecovery ? rates.recoverStep : rates.slowStep)
+        if gain < target {
+            gain = min(target, gain + step)
+        } else if gain > target {
+            gain = max(target, gain - step)
+        }
+        if abs(gain - target) <= step {
+            quickRecovery = false
+        }
+        return gain
+    }
+}
+
+/// Volume and noise levels that glide (~25 ms one-pole) toward their
+/// targets, so dragging the slider or toggling noise never steps or clicks.
+struct LevelSmoother {
+    private(set) var volume: Float
+    private(set) var noise: Float
+
+    init(volume: Float, noise: Float) {
+        self.volume = volume
+        self.noise = noise
+    }
+
+    static func coefficient(sampleRate: Double) -> Float {
+        Float(1 - exp(-1 / (sampleRate * 0.025)))
+    }
+
+    @inline(__always)
+    mutating func advance(volume target: Float, noise noiseTarget: Float, coefficient: Float) {
+        volume += (target - volume) * coefficient
+        noise += (noiseTarget - noise) * coefficient
     }
 }
 
