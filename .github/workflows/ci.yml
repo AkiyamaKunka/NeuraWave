@@ -13,6 +13,9 @@ jobs:
       - name: Build
         run: swift build
 
+      - name: Strict concurrency check (Swift 6 rules, warnings are errors)
+        run: swift build --build-path .build-strict -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+
       - name: Unit tests (render path, lost-update race, program schedule)
         run: swift test
 

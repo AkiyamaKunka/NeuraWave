@@ -1,11 +1,11 @@
 import AVFoundation
-import Combine
 
 /// Main-thread only (SessionController, menu bar, notifications on .main).
 /// The realtime render path lives in `RealtimeState` and never touches this.
 @MainActor
-final class AudioEngine: ObservableObject {
-    @Published private(set) var isPlaying = false
+final class AudioEngine {
+    /// A session is active (playing or paused); false once stopped.
+    private(set) var isPlaying = false
 
     /// Called on the main thread when the output can't be (re)started after
     /// a device change, so the session can stop instead of "playing" silence.
@@ -19,7 +19,15 @@ final class AudioEngine: ObservableObject {
     private var stopGeneration = 0
     private var isPaused = false
     private var keepAwakeActivity: NSObjectProtocol?
-    private var lastConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool)?
+    /// What to (re)build the output with after a pause or device change.
+    private struct Config {
+        var preset: BrainwavePreset
+        var style: ToneStyle
+        var volume: Float
+        var noiseEnabled: Bool
+    }
+
+    private var lastConfig: Config?
     // Written once in init, read in the nonisolated deinit.
     nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
     private var pendingRebuild: DispatchWorkItem?
@@ -47,7 +55,7 @@ final class AudioEngine: ObservableObject {
     func start(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) -> Bool {
         stopGeneration += 1
         isPaused = false
-        lastConfig = (preset, style, volume, noiseEnabled)
+        lastConfig = Config(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
 
         // The system stopped the engine under us (device change during a
         // stop fade): don't reuse that node mid-fade, rebuild from silence.
@@ -113,7 +121,7 @@ final class AudioEngine: ObservableObject {
     /// Live parameter change without rebuilding the node: the render thread
     /// crossfades through silence, so switching is click-free.
     func switchTo(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) {
-        lastConfig = (preset, style, volume, noiseEnabled)
+        lastConfig = Config(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
     }
 
@@ -134,9 +142,8 @@ final class AudioEngine: ObservableObject {
     }
 
     func update(volume: Float, noiseEnabled: Bool) {
-        if let cfg = lastConfig {
-            lastConfig = (cfg.preset, cfg.style, volume, noiseEnabled)
-        }
+        lastConfig?.volume = volume
+        lastConfig?.noiseEnabled = noiseEnabled
         state.update(volume: volume, noiseEnabled: noiseEnabled)
     }
 

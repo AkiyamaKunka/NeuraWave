@@ -44,10 +44,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return NSImage(systemSymbolName: symbol, accessibilityDescription: "NeuraWave")
     }
 
-    nonisolated func menuNeedsUpdate(_ menu: NSMenu) {
-        MainActor.assumeIsolated {
-            rebuild(menu)
-        }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        rebuild(menu)
     }
 
     private func rebuild(_ menu: NSMenu) {
