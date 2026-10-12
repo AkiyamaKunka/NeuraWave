@@ -11,6 +11,10 @@ final class AudioEngine {
     /// a device change, so the session can stop instead of "playing" silence.
     var onOutputFailure: (() -> Void)?
 
+    /// How long after stop/pause the output chain is released: the 2 s fade
+    /// plus a margin, so the fade is never cut off.
+    private static let releaseDelay: TimeInterval = 2.4
+
     private let engine = AVAudioEngine()
     private let state = RealtimeState()
     private var sourceNode: AVAudioSourceNode?
@@ -136,7 +140,7 @@ final class AudioEngine {
         // Let the fade-out finish (~2s) before tearing the node down. A newer
         // start() bumps stopGeneration, so this can never kill a live session.
         let generation = stopGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.releaseDelay) { [weak self] in
             guard let self, self.stopGeneration == generation else { return }
             self.teardownNode()
             self.isPlaying = false
@@ -157,7 +161,7 @@ final class AudioEngine {
         isPaused = true
         endKeepAwake()
         let generation = stopGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.releaseDelay) { [weak self] in
             guard let self, self.isPaused, self.stopGeneration == generation else { return }
             self.teardownNode()
         }
