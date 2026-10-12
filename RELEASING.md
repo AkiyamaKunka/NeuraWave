@@ -6,7 +6,9 @@
 3. In `CHANGELOG.md`, change `## 1.5.0 (not yet released)` to plain `## 1.5.0`,
    like the earlier versions. If an open feature PR (for example the Isochronic
    change) should ship, merge it before this step so its entry lands in the
-   right section.
+   right section. The open drafts (#3 Isochronic depth, #5 perceptual
+   volume) merge cleanly with each other and with this one, and all tests pass
+   with all three combined.
 4. Run the full battery silently. It takes about 35 minutes, including a
    30-minute endurance run. It briefly opens the window and takes a screenshot,
    so macOS may ask for Screen Recording permission. It exits non-zero if any
