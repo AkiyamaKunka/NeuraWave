@@ -177,3 +177,19 @@ enum TimeFormat {
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }
+
+enum ToneStyle: String, CaseIterable, Identifiable {
+    case binaural = "Binaural"
+    case isochronic = "Isochronic"
+
+    var id: String { rawValue }
+
+    var tip: String {
+        switch self {
+        case .binaural:
+            return "Two tones, one per ear · headphones recommended"
+        case .isochronic:
+            return "Pulsing single tone · works with speakers"
+        }
+    }
+}

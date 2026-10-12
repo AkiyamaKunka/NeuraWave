@@ -8,6 +8,9 @@ bash scripts/package-app.sh release
 
 BIN="$ROOT/build/NeuraWave.app/Contents/MacOS/NeuraWave"
 LOGDIR="$ROOT/test-results"
+# Extra flags for every run, e.g. AUTOTEST_EXTRA_ARGS="--autotest-volume 0"
+# for a silent battery.
+read -r -a EXTRA <<< "${AUTOTEST_EXTRA_ARGS:-}"
 mkdir -p "$LOGDIR"
 
 # Pass = run completed, every requested switch reached the audio, and no
@@ -26,7 +29,7 @@ run_scenario() {
   local log="$LOGDIR/$name.log"
   : > "$log"
 
-  "$BIN" "$@" >> "$log" 2>&1 &
+  "$BIN" "$@" ${EXTRA[@]+"${EXTRA[@]}"} >> "$log" 2>&1 &
   local pid=$!
   local deadline=$((SECONDS + timeout))
 
@@ -66,7 +69,7 @@ echo "=== quick scenarios ==="
 # Scenario 1 with a mid-run screenshot for visual verification
 LOG01="$LOGDIR/01-basic.log"
 : > "$LOG01"
-"$BIN" --autotest --autotest-seconds 10 --autotest-cycle 3 >> "$LOG01" 2>&1 &
+"$BIN" --autotest --autotest-seconds 10 --autotest-cycle 3 --autotest-show-window ${EXTRA[@]+"${EXTRA[@]}"} >> "$LOG01" 2>&1 &
 PID01=$!
 sleep 5
 WID="$(swift scripts/window-id-by-pid.swift "$PID01" 2>/dev/null | head -1)"
@@ -98,7 +101,7 @@ echo "=== endurance (30 min) ==="
 # Truncate first: appending to a stale log could let an old
 # AUTOTEST_COMPLETE line from a previous run fake a PASS.
 : > "$LOGDIR/04-endurance.log"
-nohup "$BIN" --autotest --autotest-seconds 1800 --autotest-cycle 30 --autotest-volume 0.06 \
+nohup "$BIN" --autotest --autotest-seconds 1800 --autotest-cycle 30 --autotest-volume 0.06 ${EXTRA[@]+"${EXTRA[@]}"} \
   >> "$LOGDIR/04-endurance.log" 2>&1 &
 ENDURANCE_PID=$!
 echo "$ENDURANCE_PID" > "$LOGDIR/endurance.pid"

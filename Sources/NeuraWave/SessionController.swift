@@ -168,7 +168,7 @@ final class SessionController: ObservableObject {
         let now = Date()
         clock.setRemaining(minutes.map { Double($0) * 60 }, at: now)
         self.clock = clock
-        remainingSeconds = clock.remaining(at: now).map { Int(ceil($0)) }
+        publishRemaining(clock.remaining(at: now))
         updateTicker()
         lastPushedSecond = -1
         pushNowPlaying()
@@ -237,11 +237,21 @@ final class SessionController: ObservableObject {
         if let program {
             advanceProgram(program, elapsed: clock.elapsed(at: now))
         }
-        remainingSeconds = clock.remaining(at: now).map { Int(ceil($0)) }
+        publishRemaining(clock.remaining(at: now))
         let second = Int(clock.elapsed(at: now))
         if second != lastPushedSecond {
             lastPushedSecond = second
             pushNowPlaying()
+        }
+    }
+
+    /// The countdown ticks twice a second but its value changes once a second;
+    /// only publish real changes so observers (the window) don't redraw for
+    /// nothing.
+    private func publishRemaining(_ remaining: TimeInterval?) {
+        let seconds = remaining.map { Int(ceil($0)) }
+        if seconds != remainingSeconds {
+            remainingSeconds = seconds
         }
     }
 

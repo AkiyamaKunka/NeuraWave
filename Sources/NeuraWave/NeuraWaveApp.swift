@@ -42,8 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isAutotest = autoTestOptions != nil
         let launchedAtLogin = !isAutotest && self.launchedAtLogin
 
-        if launchedAtLogin {
-            // Login launch: menu bar only, no window, no focus stealing.
+        // Login launches, and self-tests that don't need the window, run
+        // without a window, Dock icon or focus stealing; self-tests also
+        // run while you're working, so they never take focus.
+        let windowless = launchedAtLogin || (isAutotest && autoTestOptions?.showsWindow == false)
+        if windowless {
             NSApp.setActivationPolicy(.accessory)
             // orderOut (not close) keeps the window alive so "Show Window"
             // can bring it straight back. SwiftUI may present it a beat
@@ -56,9 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async(execute: hide)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: hide)
         } else if isAutotest {
-            // Self-tests run alongside whatever you are doing: show the
-            // window (some probes need it) but never steal focus, so a
-            // stray Space keypress can't pause the run.
             NSApp.setActivationPolicy(.regular)
         } else {
             NSApp.setActivationPolicy(.regular)

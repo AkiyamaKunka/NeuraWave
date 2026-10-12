@@ -18,6 +18,9 @@ struct AutoTestOptions {
     /// never takes Control Center over from whatever you're listening to).
     var publishesNowPlaying = false
     var windowCheck = false
+    /// Keep the main window on screen (for screenshots); otherwise self-tests
+    /// run windowless so they don't get in your way.
+    var showsWindow = false
 
     /// nil unless `--autotest` is present.
     init?(arguments: [String]) {
@@ -34,6 +37,7 @@ struct AutoTestOptions {
         deviceChangeAtSeconds = args.int("--autotest-device-change-at") ?? 0
         publishesNowPlaying = arguments.contains("--autotest-now-playing")
         windowCheck = arguments.contains("--autotest-window-check")
+        showsWindow = windowCheck || arguments.contains("--autotest-show-window")
     }
 }
 
@@ -45,14 +49,22 @@ struct CommandLineArguments {
         self.arguments = arguments
     }
 
+    /// The value of the last occurrence, so later flags override earlier
+    /// ones (e.g. a script's defaults followed by AUTOTEST_EXTRA_ARGS).
     func value(_ name: String) -> String? {
-        if let equalsForm = arguments.first(where: { $0.hasPrefix(name + "=") }) {
-            return String(equalsForm.dropFirst(name.count + 1))
+        var result: String?
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument.hasPrefix(name + "=") {
+                result = String(argument.dropFirst(name.count + 1))
+            } else if argument == name, index + 1 < arguments.count {
+                result = arguments[index + 1]
+                index += 1
+            }
+            index += 1
         }
-        if let index = arguments.firstIndex(of: name), index + 1 < arguments.count {
-            return arguments[index + 1]
-        }
-        return nil
+        return result
     }
 
     func int(_ name: String) -> Int? { value(name).flatMap { Int($0) } }

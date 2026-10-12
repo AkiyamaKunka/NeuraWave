@@ -38,4 +38,13 @@ final class AutoTestOptionsTests: XCTestCase {
         let options = try XCTUnwrap(AutoTestOptions(arguments: ["NeuraWave", "--autotest", "--autotest-seconds", "abc"]))
         XCTAssertEqual(options.totalSeconds, 1800)
     }
+
+    func testLaterFlagsOverrideEarlierOnes() throws {
+        let options = try XCTUnwrap(AutoTestOptions(arguments: [
+            "NeuraWave", "--autotest", "--autotest-volume", "0.06", "--autotest-seconds=10",
+            "--autotest-volume=0", "--autotest-seconds", "20"
+        ]))
+        XCTAssertEqual(options.volume, 0)
+        XCTAssertEqual(options.totalSeconds, 20)
+    }
 }
