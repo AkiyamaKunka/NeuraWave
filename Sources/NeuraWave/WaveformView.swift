@@ -7,16 +7,11 @@ struct WaveformView: View {
     let color: Color
 
     var body: some View {
-        Group {
-            if isPlaying && !isPaused {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                    waveCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
-                }
-            } else {
-                // Idle or paused: a static canvas — no 30 fps timeline ticking
-                // for nothing, and the wave freezes when audio is paused.
-                waveCanvas(time: 0)
-            }
+        // One timeline that simply stops while idle or paused: no 30 fps
+        // ticking for nothing, and a paused wave freezes where it was
+        // instead of snapping back to its starting phase.
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying || isPaused)) { timeline in
+            waveCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
         }
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.16)))
         .overlay {
