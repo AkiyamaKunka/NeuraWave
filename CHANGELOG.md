@@ -17,7 +17,7 @@
   - resuming mid-fade no longer clicks;
   - quitting no longer cuts the tone off with a click.
 - **Show Window:** after closing the window, "Show Window" could fail to bring it back.
-- **Hidden-window CPU:** a hidden window kept animating the waveform. CPU while playing with the window hidden dropped from about 9% to under 1%.
+- **Waveform CPU:** the waveform redrew 30 times a second through SwiftUI, even in a hidden window. It is now a Core Animation layer animated by the system: app CPU while playing is under 1% with the window hidden (was about 9%) or visible (was about 7.5%).
 - **Download link:** the README's Download button returned a 404.
 
 ### Added
