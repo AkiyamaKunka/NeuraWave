@@ -110,7 +110,8 @@ struct ContentView: View {
         guard session.isPlaying, !session.isRunningProgram,
               BrainwavePreset.all.contains(where: { $0.id == current.id }),
               current.id != selected.id else { return }
+        // Display only: the session already saved it (and deliberately
+        // doesn't during self-tests, which must never touch your settings).
         selected = current
-        settings.preset = current
     }
 }

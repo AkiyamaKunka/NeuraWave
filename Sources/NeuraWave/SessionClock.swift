@@ -47,7 +47,8 @@ struct SessionClock: Equatable {
     }
 
     /// Restart the countdown: `seconds` more playing time from `now` (nil =
-    /// no end). Time already played is kept for progress displays.
+    /// no end). Time already played is kept for progress displays, so Now
+    /// Playing shows e.g. 20:00 of 50:00 after picking 30 min twenty minutes in.
     mutating func setRemaining(_ seconds: TimeInterval?, at now: Date) {
         duration = seconds.map { elapsed(at: now) + $0 }
     }

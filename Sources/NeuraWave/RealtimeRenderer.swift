@@ -61,6 +61,8 @@ final class RealtimeState: @unchecked Sendable {
 
     /// Called only while no render callback can run (node detached), so a
     /// rebuilt node fades in from silence instead of starting at full level.
+    /// This is the one main-thread write to render-owned state; calling it
+    /// while a node is attached would race with render().
     func resetGain() {
         lock.withLock { fader = GainFader() }
     }

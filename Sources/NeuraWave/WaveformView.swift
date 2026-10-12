@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct WaveformView: View {
@@ -5,14 +6,19 @@ struct WaveformView: View {
     let isPaused: Bool
     let beat: Double
     let color: Color
+    /// False while the window is hidden, minimized or fully covered. A
+    /// hidden window (e.g. after a login launch, playing from the menu bar)
+    /// would otherwise keep redrawing at 30 fps for nobody (~7% CPU).
+    @State private var isOnScreen = true
 
     var body: some View {
         // One timeline that simply stops while idle or paused: no 30 fps
         // ticking for nothing, and a paused wave freezes where it was
         // instead of snapping back to its starting phase.
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying || isPaused)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying || isPaused || !isOnScreen)) { timeline in
             waveCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
         }
+        .background(WindowOcclusionReader(isOnScreen: $isOnScreen))
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.16)))
         .overlay {
             if !isPlaying {
@@ -59,6 +65,55 @@ struct WaveformView: View {
                     with: .color(color.opacity(opacity)),
                     lineWidth: [1.8, 1.5, 1.2][index]
                 )
+            }
+        }
+    }
+}
+
+/// Reports whether the hosting window is actually visible on screen
+/// (`NSWindow.occlusionState`), tracking show/hide, minimize and covering.
+private struct WindowOcclusionReader: NSViewRepresentable {
+    @Binding var isOnScreen: Bool
+
+    func makeNSView(context: Context) -> ObservingView {
+        let view = ObservingView()
+        view.onChange = { visible in
+            if isOnScreen != visible { isOnScreen = visible }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: ObservingView, context: Context) {}
+
+    final class ObservingView: NSView {
+        var onChange: ((Bool) -> Void)?
+        // Set and cleared on the main thread; read once more in deinit.
+        nonisolated(unsafe) private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+                self.observer = nil
+            }
+            guard let window else { return }
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
+            }
+            report()
+        }
+
+        private func report() {
+            onChange?(window?.occlusionState.contains(.visible) ?? false)
+        }
+
+        deinit {
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
             }
         }
     }

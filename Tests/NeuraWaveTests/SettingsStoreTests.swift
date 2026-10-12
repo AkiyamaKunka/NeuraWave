@@ -6,7 +6,7 @@ final class SettingsStoreTests: XCTestCase {
     private var defaults: UserDefaults!
 
     override func setUp() {
-        suiteName = "NeuraWaveTests.\(UUID().uuidString)"
+        suiteName = "NeuraWaveTests.SettingsStore"
         defaults = UserDefaults(suiteName: suiteName)
     }
 

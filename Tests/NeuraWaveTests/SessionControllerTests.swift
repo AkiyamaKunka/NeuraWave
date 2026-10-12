@@ -13,7 +13,7 @@ final class SessionControllerTests: XCTestCase {
     override func setUp() async throws {
         audio = FakeAudio()
         nowPlaying = FakeNowPlaying()
-        suiteName = "NeuraWaveSessionTests.\(UUID().uuidString)"
+        suiteName = "NeuraWaveTests.Session"
         settings = SettingsStore(defaults: UserDefaults(suiteName: suiteName)!)
         clock = Date(timeIntervalSinceReferenceDate: 0)
         session = SessionController(audio: audio, nowPlaying: nowPlaying, settings: settings) { [unowned self] in self.clock }

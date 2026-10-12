@@ -34,6 +34,10 @@ SCENARIOS=(
   "timer-pause|--autotest-seconds 75 --autotest-cycle 100 --autotest-timer-minutes 1 --autotest-pause-at 10 --autotest-resume-at 15|TIMER_STOP_VERIFIED at 6[4-9]s"
 )
 
+# Self-tests must never change your saved settings. The debug binary keeps
+# them in the "NeuraWave" defaults domain; snapshot it to compare after.
+settings_before="$(defaults read NeuraWave 2>/dev/null | grep -vE 'NSWindow|NSStatusItem' || true)"
+
 for scenario in "${SCENARIOS[@]}"; do
   IFS='|' read -r name args _ <<< "$scenario"
   # shellcheck disable=SC2086
@@ -55,5 +59,13 @@ for scenario in "${SCENARIOS[@]}"; do
     failed=1
   fi
 done
+settings_after="$(defaults read NeuraWave 2>/dev/null | grep -vE 'NSWindow|NSStatusItem' || true)"
+if [ "$settings_before" = "$settings_after" ]; then
+  echo "PASS settings-untouched"
+else
+  echo "FAIL settings-untouched (a self-test changed saved settings)"
+  diff <(echo "$settings_before") <(echo "$settings_after")
+  failed=1
+fi
 echo "logs: $LOGDIR"
 exit $failed

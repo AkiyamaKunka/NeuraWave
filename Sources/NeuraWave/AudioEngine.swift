@@ -73,6 +73,8 @@ final class AudioEngine {
                   let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
                 return false
             }
+            // Safe: no node is attached, so no render callback can be running
+            // (resetGain writes render-owned state).
             state.resetGain()
             let node = Self.makeSourceNode(format: format, sampleRate: sampleRate, state: state)
             engine.attach(node)
