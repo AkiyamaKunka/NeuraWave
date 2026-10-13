@@ -47,7 +47,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
         }
-        menuBar = MenuBarController(session: .shared, showWindow: MainWindow.show)
+        // Self-tests get no menu bar icon: a second NeuraWave icon next to
+        // your real one is confusing, and quitting it would end the run.
+        if autoTest == nil {
+            menuBar = MenuBarController(session: .shared, showWindow: MainWindow.show)
+        }
 
         if let index = arguments.firstIndex(of: "--screenshot"), index + 1 < arguments.count {
             DeveloperTools.renderScreenshot(to: arguments[index + 1])
