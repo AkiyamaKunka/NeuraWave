@@ -6,10 +6,13 @@ struct NeuraWaveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
-        // Runs before any scene or view exists, so the window never reads a
-        // volume saved on the old linear curve. Self-tests never touch settings.
+        // Before any scene or view reads settings. Self-tests never touch them.
         if AutoTestOptions(arguments: ProcessInfo.processInfo.arguments) == nil {
-            SettingsStore.standard.migrateVolumeCurveIfNeeded()
+            let settings = SettingsStore.standard
+            // Order matters: settle the pre-1.5 default first (a linear
+            // value), then convert saved volumes to the new curve.
+            settings.keepEarlierDefaultVolumeIfNeeded()
+            settings.migrateVolumeCurveIfNeeded()
         }
     }
 

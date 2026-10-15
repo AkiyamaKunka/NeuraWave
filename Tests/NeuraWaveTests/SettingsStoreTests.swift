@@ -94,4 +94,31 @@ final class SettingsStoreTests: XCTestCase {
         defaults.set("relax", forKey: "preset")
         XCTAssertTrue(store.hasEarlierVersionSettings)
     }
+
+    func testUpdatersWhoNeverMovedTheSliderKeepTheirLevel() {
+        defaults.set("relax", forKey: "preset") // saved by an earlier version, no volume
+        let store = SettingsStore(defaults: defaults)
+        store.keepEarlierDefaultVolumeIfNeeded()
+        XCTAssertEqual(store.volume, SettingsStore.earlierDefaultVolume)
+        store.volume = 0.3
+        store.keepEarlierDefaultVolumeIfNeeded() // only ever once
+        XCTAssertEqual(store.volume, 0.3)
+    }
+
+    func testFreshInstallsGetTheNewDefault() {
+        let store = SettingsStore(defaults: defaults)
+        store.keepEarlierDefaultVolumeIfNeeded()
+        XCTAssertEqual(store.volume, VolumeLevel.defaultValue)
+        store.preset = BrainwavePreset.byId("relax") // later launches never apply it
+        store.keepEarlierDefaultVolumeIfNeeded()
+        XCTAssertEqual(store.volume, VolumeLevel.defaultValue)
+    }
+
+    func testUpdaterWithoutSavedVolumeKeepsTheSameLoudnessOnTheNewCurve() {
+        defaults.set("relax", forKey: "preset")
+        let store = SettingsStore(defaults: defaults)
+        store.keepEarlierDefaultVolumeIfNeeded()
+        store.migrateVolumeCurveIfNeeded()
+        XCTAssertEqual(Double(SessionController.amplitude(store.volume)), 0.55, accuracy: 1e-6)
+    }
 }

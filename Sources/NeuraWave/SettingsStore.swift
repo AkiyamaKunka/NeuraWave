@@ -16,6 +16,7 @@ struct SettingsStore {
         static let program = "program"
         static let didApplyDefaultLoginItem = "didApplyDefaultLoginItem"
         static let volumeCurve = "volumeCurve"
+        static let checkedEarlierDefaultVolume = "checkedEarlierDefaultVolume"
     }
 
     /// Saved volumes used to be linear amplitudes; now they are positions on
@@ -80,6 +81,20 @@ struct SettingsStore {
     var hasEarlierVersionSettings: Bool {
         [Key.preset, Key.style, Key.volume, Key.program, Key.minutes, Key.noise]
             .contains { defaults.object(forKey: $0) != nil }
+    }
+
+    /// Earlier versions defaulted to 0.55 and only saved the volume once the
+    /// slider moved. On the first launch of this version, someone updating
+    /// who never moved it keeps that level; fresh installs get the softer
+    /// new default. Runs once.
+    static let earlierDefaultVolume = 0.55
+
+    func keepEarlierDefaultVolumeIfNeeded() {
+        guard !defaults.bool(forKey: Key.checkedEarlierDefaultVolume) else { return }
+        if hasEarlierVersionSettings, defaults.object(forKey: Key.volume) == nil {
+            defaults.set(Self.earlierDefaultVolume, forKey: Key.volume)
+        }
+        defaults.set(true, forKey: Key.checkedEarlierDefaultVolume)
     }
 
     var didApplyDefaultLoginItem: Bool {
