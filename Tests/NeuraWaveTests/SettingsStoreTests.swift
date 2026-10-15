@@ -72,4 +72,11 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.style, .binaural)
         XCTAssertEqual(store.volume, 1)
     }
+
+    func testDetectsSettingsFromAnEarlierVersion() {
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.hasEarlierVersionSettings, "fresh install")
+        defaults.set("relax", forKey: "preset")
+        XCTAssertTrue(store.hasEarlierVersionSettings)
+    }
 }

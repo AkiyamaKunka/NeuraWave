@@ -10,7 +10,8 @@
 - **Launch at Login:**
   - turning it off didn't stick;
   - a login launch popped up the window;
-  - when macOS needs approval, the toggle now opens System Settings.
+  - when macOS needs approval, the toggle now opens System Settings;
+  - updating doesn't switch it back on if you had turned it off.
 - **Menu bar and AirPods start:** these replayed stale settings or an old program. They now play exactly what the window's Start would.
 - **Resume:**
   - a failed resume is now reported;
@@ -42,6 +43,8 @@
   - unit tests cover the render path, session logic, settings, timing and menus, all without audio hardware;
   - CI adds a Swift 6 strict-concurrency check;
   - CI runs every self-test scenario in parallel (`scripts/quick-tests.sh`).
+- **Default volume is softer:** 0.385 instead of 0.55, if you never moved the volume slider.
+- **Packaging:** release builds are universal (Apple silicon and Intel), and a broken code signature now fails the build instead of shipping.
 - **Self-tests:** they run without a window, Dock or menu bar icon and stay out of Now Playing. They never touch saved settings, and `--autotest-volume 0` makes them silent.
 
 ## 1.4.0
