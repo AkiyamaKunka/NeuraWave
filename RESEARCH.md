@@ -36,6 +36,7 @@ NeuraWave is a focus/relaxation aid, not a medical device — see the disclaimer
   defensible in Isochronic mode**; the UI should steer users that way.
 
 ### Isochronic tones — plausible, thinner evidence
+- NeuraWave's Isochronic style uses **100% sinusoidal amplitude modulation** (silence to full on every beat, smooth so it never clicks), matching the AM stimuli of the ASSR studies above. Earlier versions only dipped to 45%, a much weaker modulation.
 - A 2026 scoping review on amplitude-modulated audio in brainwave
   entrainment exists ("Amplitude Modulated Audio Signals in Brainwave
   Entrainment", Taylor & Francis) and school-based studies (Jakarta) report
