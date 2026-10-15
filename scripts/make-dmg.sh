@@ -24,7 +24,8 @@ if [ -e "$DMG" ] && [ "${FORCE:-}" != 1 ]; then
   exit 1
 fi
 
-bash scripts/package-app.sh release >&2
+# Releases run on Apple silicon and Intel Macs (UNIVERSAL=0 to skip).
+UNIVERSAL="${UNIVERSAL:-1}" bash scripts/package-app.sh release >&2
 [ -x "$APP/Contents/MacOS/NeuraWave" ] || { echo "app bundle missing: $APP" >&2; exit 1; }
 
 STAGING="$(mktemp -d)"

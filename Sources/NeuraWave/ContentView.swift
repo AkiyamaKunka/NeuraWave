@@ -38,7 +38,9 @@ struct ContentView: View {
             ToneControls(style: $style, noiseOn: $noiseOn, showGammaTip: selected.id == "peak" && style == .binaural)
             VolumeControl(volume: $volume)
             TransportBar(
-                program: selectedProgram,
+                // A single preset started from the menu bar while a program
+                // is selected still gets the timer controls.
+                program: session.isPlaying && !session.isRunningProgram ? nil : selectedProgram,
                 minutes: minutes,
                 remainingSeconds: session.remainingSeconds,
                 isPlaying: session.isPlaying,
