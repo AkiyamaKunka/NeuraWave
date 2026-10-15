@@ -31,7 +31,7 @@
 
 ### Changed
 - **Isochronic pulses are full depth:** the tone now swells from silence to full on every beat (100% modulation, as in the 40 Hz research), loudness-matched to the old 45–100% pulses.
-- **Audio rendering:** about 17× cheaper (phasor oscillators instead of per-sample `sin()`); render cost is about 0.03% of real time. A larger output buffer (2048 frames) cuts audio wakeups by three quarters.
+- **Audio rendering:** about 17× cheaper (phasor oscillators instead of per-sample `sin()`); render cost is about 0.03% of real time. A larger output buffer (2048 frames, or the device's maximum, e.g. 960 on AirPods) means far fewer audio wakeups.
 - **Code structure:** split into small, documented types:
   - `SessionClock`, `SettingsStore`;
   - `Voice`, `GainFader`, `LevelSmoother`, `NoiseGenerator`;
