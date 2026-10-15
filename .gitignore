@@ -8,3 +8,4 @@ NeuraWave-*.zip
 /screenshot-final.png
 /screenshot-user.png
 *.log
+.build-strict/

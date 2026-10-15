@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import ServiceManagement
 
 /// Menu bar item so a session keeps running (and can be controlled) after the
 /// window is closed. The window is optional; the sound is not.
@@ -10,6 +9,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let session: SessionController
     private let showWindow: () -> Void
     private var cancellables = Set<AnyCancellable>()
+    /// The "Remaining" line while the menu is open, kept ticking live.
+    private weak var countdownItem: NSMenuItem?
+    private var isMenuOpen = false
 
     init(session: SessionController, showWindow: @escaping () -> Void) {
         self.session = session
@@ -34,6 +36,27 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             }
             .store(in: &cancellables)
 
+        // The session's countdown ticks in .common run-loop modes, so this
+        // keeps updating while the menu is open and tracking.
+        session.$remainingSeconds
+            .sink { [weak self] remaining in
+                guard let remaining, let item = self?.countdownItem else { return }
+                item.title = Self.countdownTitle(remaining)
+            }
+            .store(in: &cancellables)
+        // If the session starts, stops or pauses while the menu is open (timer
+        // runs out, AirPods), close the menu rather than leave stale items, or
+        // shift items under the pointer by rebuilding it in place.
+        session.$isPlaying.combineLatest(session.$isPaused)
+            .dropFirst()
+            .sink { [weak self] _, _ in
+                DispatchQueue.main.async {
+                    guard let self, self.isMenuOpen else { return }
+                    self.statusItem.menu?.cancelTracking()
+                }
+            }
+            .store(in: &cancellables)
+
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -44,93 +67,91 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return NSImage(systemSymbolName: symbol, accessibilityDescription: "NeuraWave")
     }
 
-    nonisolated func menuNeedsUpdate(_ menu: NSMenu) {
-        MainActor.assumeIsolated {
-            rebuild(menu)
-        }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        rebuild(menu)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
+        countdownItem = nil
+    }
+
+    private static func countdownTitle(_ remaining: Int) -> String {
+        "Remaining \(TimeFormat.clock(remaining))"
     }
 
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
-
-        let header = NSMenuItem(title: "NeuraWave", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        menu.addItem(info("NeuraWave"))
         menu.addItem(.separator())
+        addSessionItems(to: menu)
+        menu.addItem(presetsItem())
+        menu.addItem(.separator())
+        menu.addItem(action("Show Window", #selector(openWindow)))
+        menu.addItem(loginItem())
+        menu.addItem(action("Quit NeuraWave", #selector(quitApp), key: "q"))
+    }
 
-        let status = NSMenuItem(
-            title: session.isPlaying
-                ? (session.isPaused ? "Paused — tap to resume" : "Playing — tap to pause")
-                : "Tap to start",
-            action: #selector(togglePlayback),
-            keyEquivalent: ""
-        )
-        status.target = self
-        menu.addItem(status)
-
-        if session.isPlaying, session.programTitle == nil {
-            let now = NSMenuItem(title: session.displayTitle, action: nil, keyEquivalent: "")
-            now.isEnabled = false
-            menu.addItem(now)
-        }
-
-        if session.isPlaying, let remaining = session.remainingSeconds {
-            let countdown = NSMenuItem(title: "Remaining \(Self.format(remaining))", action: nil, keyEquivalent: "")
-            countdown.isEnabled = false
+    /// Start / Pause / Resume, what is playing, the countdown, and Stop.
+    private func addSessionItems(to menu: NSMenu) {
+        let toggleTitle = !session.isPlaying ? "Start" : (session.isPaused ? "Resume" : "Pause")
+        menu.addItem(action(toggleTitle, #selector(togglePlayback)))
+        guard session.isPlaying else { return }
+        menu.addItem(info(session.programTitle ?? session.sessionTitle))
+        if let remaining = session.remainingSeconds {
+            let countdown = info(Self.countdownTitle(remaining))
+            countdownItem = countdown
             menu.addItem(countdown)
         }
+        menu.addItem(action("Stop", #selector(stopPlayback)))
+    }
 
-        if let title = session.programTitle {
-            let prog = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            prog.isEnabled = false
-            menu.addItem(prog)
-        }
-
-        if session.isPlaying {
-            let stop = NSMenuItem(title: "Stop", action: #selector(stopPlayback), keyEquivalent: "")
-            stop.target = self
-            menu.addItem(stop)
-        }
-
-        // Presets straight from the menu bar (the window is optional).
-        let presets = NSMenuItem(title: "Presets", action: nil, keyEquivalent: "")
-        let presetMenu = NSMenu()
+    /// Presets straight from the menu bar (the window is optional).
+    private func presetsItem() -> NSMenuItem {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
         for preset in BrainwavePreset.all {
-            let item = NSMenuItem(
-                title: "\(preset.name) · \(preset.band)",
-                action: #selector(playPreset(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
+            let item = action("\(preset.name) · \(preset.band)", #selector(playPreset(_:)))
             item.representedObject = preset.id
             item.state = session.isPlaying && session.currentPreset.id == preset.id ? .on : .off
             // A running program owns the preset sequence.
             item.isEnabled = !session.isRunningProgram
-            presetMenu.addItem(item)
+            submenu.addItem(item)
         }
-        presetMenu.autoenablesItems = false
-        presets.submenu = presetMenu
-        menu.addItem(presets)
+        let presets = NSMenuItem(title: "Presets", action: nil, keyEquivalent: "")
+        presets.submenu = submenu
+        return presets
+    }
 
-        menu.addItem(.separator())
-        let show = NSMenuItem(title: "Show Window", action: #selector(openWindow), keyEquivalent: "")
-        show.target = self
-        menu.addItem(show)
-        let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            login.state = .on
-        case .requiresApproval:
-            login.state = .mixed
-            login.title = "Launch at Login (approve in System Settings)"
-        default:
-            login.state = .off
+    private func loginItem() -> NSMenuItem {
+        let item = action("Launch at Login", #selector(toggleLoginItem))
+        switch LoginItem.state {
+        case .on:
+            item.state = .on
+        case .needsApproval:
+            item.state = .mixed
+            item.title = "Launch at Login (approve in System Settings)"
+        case .off:
+            item.state = .off
         }
-        login.target = self
-        menu.addItem(login)
-        let quit = NSMenuItem(title: "Quit NeuraWave", action: #selector(quitApp), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
+        return item
+    }
+
+    private func action(_ title: String, _ selector: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    /// A greyed-out, informational line.
+    private func info(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 
     @objc private func togglePlayback() {
@@ -152,25 +173,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleLoginItem() {
-        let service = SMAppService.mainApp
-        if service.status == .enabled {
-            try? service.unregister()
-        } else {
-            try? service.register()
-            // macOS can require the user to approve login items; without
-            // this the toggle just silently stays off.
-            if service.status == .requiresApproval {
-                SMAppService.openSystemSettingsLoginItems()
-            }
-        }
+        LoginItem.toggle()
     }
 
     @objc private func quitApp() {
         // AppDelegate fades out and stops the session before terminating.
         NSApp.terminate(nil)
-    }
-
-    private static func format(_ seconds: Int) -> String {
-        String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }

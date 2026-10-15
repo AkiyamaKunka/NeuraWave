@@ -8,7 +8,11 @@ bash scripts/package-app.sh release
 
 BIN="$ROOT/build/NeuraWave.app/Contents/MacOS/NeuraWave"
 LOGDIR="$ROOT/test-results"
+# Extra flags for every run, e.g. AUTOTEST_EXTRA_ARGS="--autotest-volume 0"
+# for a silent battery.
+read -r -a EXTRA <<< "${AUTOTEST_EXTRA_ARGS:-}"
 mkdir -p "$LOGDIR"
+FAILED=0
 
 # Pass = run completed, every requested switch reached the audio, and no
 # in-run check (DEVICE_CHECK, WINDOW_CHECK, …) reported a failure.
@@ -26,7 +30,7 @@ run_scenario() {
   local log="$LOGDIR/$name.log"
   : > "$log"
 
-  "$BIN" "$@" >> "$log" 2>&1 &
+  "$BIN" "$@" ${EXTRA[@]+"${EXTRA[@]}"} >> "$log" 2>&1 &
   local pid=$!
   local deadline=$((SECONDS + timeout))
 
@@ -40,6 +44,7 @@ run_scenario() {
     echo "PASS $name"
   else
     echo "FAIL $name"
+    FAILED=1
     tail -5 "$log"
   fi
 
@@ -66,7 +71,7 @@ echo "=== quick scenarios ==="
 # Scenario 1 with a mid-run screenshot for visual verification
 LOG01="$LOGDIR/01-basic.log"
 : > "$LOG01"
-"$BIN" --autotest --autotest-seconds 10 --autotest-cycle 3 >> "$LOG01" 2>&1 &
+"$BIN" --autotest --autotest-seconds 10 --autotest-cycle 3 --autotest-show-window ${EXTRA[@]+"${EXTRA[@]}"} >> "$LOG01" 2>&1 &
 PID01=$!
 sleep 5
 WID="$(swift scripts/window-id-by-pid.swift "$PID01" 2>/dev/null | head -1)"
@@ -78,27 +83,23 @@ if scenario_passed "$LOG01"; then
   echo "PASS 01-basic"
 else
   echo "FAIL 01-basic"
+  FAILED=1
   tail -5 "$LOG01"
 fi
 kill "$PID01" 2>/dev/null || true
 wait "$PID01" 2>/dev/null || true
 
-run_scenario "02-stop-restart" 30 --autotest --autotest-seconds 16 --autotest-cycle 3 --autotest-stop-at 6
-run_scenario "03-timer-autostop" 90 --autotest --autotest-seconds 70 --autotest-cycle 5 --autotest-timer-minutes 1
-run_scenario "05-program-advance" 90 --autotest --autotest-seconds 45 --autotest-cycle 30 --autotest-program-seconds 45
-run_scenario "06-switch-stress" 60 --autotest --autotest-seconds 40 --autotest-cycle 2
-run_scenario "07-pause-resume" 40 --autotest --autotest-seconds 20 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 12
-run_scenario "08-quick-resume" 30 --autotest --autotest-seconds 12 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 6
-run_scenario "09-timer-pause" 100 --autotest --autotest-seconds 75 --autotest-cycle 100 --autotest-timer-minutes 1 --autotest-pause-at 10 --autotest-resume-at 15
-run_scenario "10-program-pause" 90 --autotest --autotest-seconds 45 --autotest-cycle 30 --autotest-program-seconds 45 --autotest-pause-at 10 --autotest-resume-at 15
-run_scenario "11-device-change" 30 --autotest --autotest-seconds 14 --autotest-cycle 50 --autotest-device-change-at 4
+# Every short scenario, in parallel, against the packaged app.
+if NEURAWAVE_BIN="$BIN" QUICK_TESTS_LOGDIR="$LOGDIR/quick" \
+   bash scripts/quick-tests.sh ${EXTRA[@]+"${EXTRA[@]}"}; then :; else FAILED=1; fi
+
 run_scenario "12-window-reopen" 30 --autotest --autotest-seconds 8 --autotest-cycle 50 --autotest-window-check
 
 echo "=== endurance (30 min) ==="
 # Truncate first: appending to a stale log could let an old
 # AUTOTEST_COMPLETE line from a previous run fake a PASS.
 : > "$LOGDIR/04-endurance.log"
-nohup "$BIN" --autotest --autotest-seconds 1800 --autotest-cycle 30 --autotest-volume 0.06 \
+nohup "$BIN" --autotest --autotest-seconds 1800 --autotest-cycle 30 --autotest-volume 0.06 ${EXTRA[@]+"${EXTRA[@]}"} \
   >> "$LOGDIR/04-endurance.log" 2>&1 &
 ENDURANCE_PID=$!
 echo "$ENDURANCE_PID" > "$LOGDIR/endurance.pid"
@@ -127,9 +128,15 @@ if scenario_passed "$LOGDIR/04-endurance.log"; then
   echo "PASS 04-endurance"
 else
   echo "FAIL 04-endurance"
+  FAILED=1
   tail -5 "$LOGDIR/04-endurance.log"
 fi
 kill "$ENDURANCE_PID" 2>/dev/null || true
 kill "$PERF_PID" 2>/dev/null || true
 wait "$ENDURANCE_PID" 2>/dev/null || true
 wait "$PERF_PID" 2>/dev/null || true
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "SOME SCENARIOS FAILED"
+fi
+exit "$FAILED"

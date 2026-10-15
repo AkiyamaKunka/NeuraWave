@@ -1,8 +1,10 @@
 import Combine
-import Darwin
 import Foundation
 import SwiftUI
 
+/// The one playback session behind the window, the menu bar, AirPods and
+/// Control Center: what is playing, timers and focus programs, pause/resume,
+/// and the Now Playing metadata. Sound itself is produced by `AudioEngine`.
 @MainActor
 final class SessionController: ObservableObject {
     /// One app-wide instance shared by the window and the menu bar item.
@@ -15,58 +17,49 @@ final class SessionController: ObservableObject {
     @Published private(set) var programTitle: String?
     @Published private(set) var programStep: (index: Int, count: Int)?
     @Published private(set) var isRunningProgram = false
-    /// What the session is called right now (preset, or program · step).
-    var displayTitle: String { sessionTitle }
-    @Published private(set) var currentPreset: BrainwavePreset = BrainwavePreset.byId("focus")
-
-    let engine = AudioEngine()
-    private let nowPlaying = NowPlayingController.shared
+    @Published private(set) var currentPreset: BrainwavePreset = BrainwavePreset.byId(SettingsStore.defaultPresetID)
+    /// What the session is called right now (preset, or "Program · Step").
     @Published private(set) var sessionTitle = "NeuraWave"
-    private var timer: Timer?
-    private var endDate: Date?
-    private var lastStartConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?)?
-    /// Pause bookkeeping: pausing freezes the countdown (timer and program),
-    /// resuming resumes it — a paused session never expires underneath you.
-    private var pausedRemaining: TimeInterval?
-    private var programPausedAt: Date?
-    private var programPauseTotal: TimeInterval = 0
-    /// Whole-second throttle for Now Playing metadata pushes.
-    private var lastPushedSecond = -1
-    private var program: FocusProgram?
-    private var programStartedAt = Date()
-    private var autotestProgram = false
-    private var autotestRunning = false
-    private var autotestTimer: Timer?
-    private var autotestConfigIndex = 0
-    private var autotestStartedAt = Date()
-    private var autotestLastCycle = Date()
-    private var autotestTotal = 0
-    private var autotestCycle = 30
-    private var autotestTimerMinutes: Int?
-    private var autotestStopAt = 0
-    private var autotestStopPerformed = false
-    private var autotestTimerVerified = false
-    private var autotestVolume: Double = 0.08
-    private var autotestPauseAt = 0
-    private var autotestResumeAt = 0
-    private var autotestPausePerformed = false
-    private var autotestResumePerformed = false
-    private var autotestArguments: [String] = []
-    private var autotestDeviceChangeAt = 0
-    private var autotestDeviceChangePerformed = false
 
-    private struct AutoTestConfig {
-        let preset: BrainwavePreset
-        let style: ToneStyle
-        let noise: Bool
+    let audio: AudioOutput
+    /// The real engine when running for real (self-tests and diagnostics).
+    var engine: AudioEngine? { audio as? AudioEngine }
+    var settings: SettingsStore
+    /// Set while the hidden self-test drives this session (see AutoTest.swift).
+    weak var selfTest: AutoTestRunner?
+
+    /// The sound being played (program steps change `preset` as they go).
+    private struct PlaybackConfig {
+        var preset: BrainwavePreset
+        var style: ToneStyle
+        var volume: Double
+        var noise: Bool
     }
+
+    private let nowPlaying: NowPlayingPublishing
+    private let now: () -> Date
+    private var playback: PlaybackConfig?
+    private var clock: SessionClock?
+    private var program: FocusProgram?
+    private var ticker: Timer?
+    /// The last-30-seconds ease-out is currently lowering the volume.
+    private var isEndingFadeApplied = false
 
     private static let audioFailureMessage = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
 
-    init() {
+    init(
+        audio: AudioOutput? = nil,
+        nowPlaying: NowPlayingPublishing? = nil,
+        settings: SettingsStore = .standard,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.audio = audio ?? AudioEngine()
+        self.nowPlaying = nowPlaying ?? NowPlayingController.shared
+        self.settings = settings
+        self.now = now
         // The output device went away (or changed) and couldn't be restarted:
         // stop rather than claim to be playing silence.
-        engine.onOutputFailure = { [weak self] in
+        self.audio.onOutputFailure = { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.isPlaying else { return }
                 self.stop()
@@ -75,51 +68,55 @@ final class SessionController: ObservableObject {
         }
     }
 
-    private static let autotestConfigs: [AutoTestConfig] = {
-        var configs: [AutoTestConfig] = []
-        for style in ToneStyle.allCases {
-            for preset in BrainwavePreset.all {
-                configs.append(AutoTestConfig(preset: preset, style: style, noise: false))
-                configs.append(AutoTestConfig(preset: preset, style: style, noise: true))
-            }
-        }
-        return configs
-    }()
+    private var isSelfTesting: Bool { selfTest != nil }
 
-    func start(
-        preset: BrainwavePreset,
-        style: ToneStyle,
-        volume: Double,
-        withNoise: Bool,
-        minutes: Int?
-    ) {
-        stop()
-        lastStartConfig = (preset, style, volume, withNoise, minutes)
-        guard engine.start(preset: preset, style: style, volume: Float(volume), withNoise: withNoise) else {
-            lastError = Self.audioFailureMessage
-            return
+    // MARK: - Starting
+
+    /// Plays one preset, optionally with a sleep timer.
+    func start(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?) {
+        let config = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
+        guard begin(config, duration: minutes.map { Double($0) * 60 }) else { return }
+        currentPreset = preset
+        sessionTitle = preset.name
+        rememberPreset(preset)
+        pushNowPlaying()
+    }
+
+    /// Runs a timed program: presets auto-advance through the click-free
+    /// crossfade, and the session stops itself when the schedule ends.
+    func startProgram(_ program: FocusProgram, style: ToneStyle, volume: Double, withNoise: Bool) {
+        let first = program.steps[0].preset
+        let config = PlaybackConfig(preset: first, style: style, volume: volume, noise: withNoise)
+        guard begin(config, duration: program.totalSeconds) else { return }
+        self.program = program
+        isRunningProgram = true
+        if publishesNowPlaying {
+            nowPlaying.setSkipEnabled(false)
         }
-        isPlaying = engine.isPlaying
-        guard isPlaying else { return }
+        currentPreset = first
+        programStep = (0, program.steps.count)
+        programTitle = Self.title(of: program, step: 0)
+        // Same "Program · Step" form as later steps.
+        sessionTitle = programTitle ?? program.name
+        pushNowPlaying()
+    }
+
+    /// Shared start sequence: stop whatever plays, start the engine, set up
+    /// the clock and countdown. False (with `lastError` set) on failure.
+    private func begin(_ config: PlaybackConfig, duration: TimeInterval?) -> Bool {
+        stop()
+        playback = config
+        guard audio.start(preset: config.preset, style: config.style, volume: Float(config.volume), withNoise: config.noise) else {
+            lastError = Self.audioFailureMessage
+            return false
+        }
+        isPlaying = true
         isPaused = false
         lastError = nil
-        resetPauseBookkeeping()
-        isRunningProgram = false
-        currentPreset = preset
-        rememberPreset(preset)
-        sessionTitle = preset.name
-
-        if let minutes {
-            endDate = Date().addingTimeInterval(Double(minutes) * 60)
-            remainingSeconds = minutes * 60
-            scheduleCountdown()
-        } else {
-            endDate = nil
-            remainingSeconds = nil
-            timer?.invalidate()
-            timer = nil
-        }
-        pushNowPlaying()
+        clock = SessionClock(startedAt: now(), duration: duration)
+        remainingSeconds = duration.map { Int($0) }
+        updateTicker()
+        return true
     }
 
     /// Start from the menu bar / AirPods while stopped: exactly what the
@@ -128,91 +125,47 @@ final class SessionController: ObservableObject {
     /// them. Replaying an in-memory "last config" instead mixed stale and
     /// fresh settings (e.g. an old style or timer).
     func startLast() {
-        startFromSavedSettings()
+        if let program = settings.program {
+            startProgram(program, style: settings.style, volume: settings.volume, withNoise: settings.noise)
+        } else {
+            startSaved(preset: settings.preset)
+        }
     }
 
-    private func startFromSavedSettings() {
-        let defaults = UserDefaults.standard
-        let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
-        let volume = VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double)
-        let noise = defaults.bool(forKey: "noise")
-        if let program = FocusProgram.all.first(where: { $0.id == defaults.string(forKey: "program") }) {
-            startProgram(program, style: style, volume: volume, withNoise: noise)
+    /// `preset` with the saved style, volume, noise and timer.
+    private func startSaved(preset: BrainwavePreset) {
+        start(preset: preset, style: settings.style, volume: settings.volume, withNoise: settings.noise, minutes: settings.minutes)
+    }
+
+    /// Menu bar "Presets" submenu: switch the playing preset in place, or
+    /// start it fresh with the window's saved style, volume and timer.
+    func playPreset(_ preset: BrainwavePreset) {
+        if isPlaying, program == nil, let playback {
+            if isPaused {
+                resumePlayback()
+            }
+            switchPreset(preset: preset, style: playback.style, volume: playback.volume, withNoise: playback.noise)
             return
         }
-        let preset = BrainwavePreset.all.first { $0.id == defaults.string(forKey: "preset") } ?? BrainwavePreset.byId("focus")
-        let minutes = defaults.integer(forKey: "minutes")
-        start(preset: preset, style: style, volume: volume, withNoise: noise, minutes: minutes > 0 ? minutes : nil)
+        startSaved(preset: preset)
     }
 
     /// The playing single preset becomes the saved choice, whoever picked it
     /// (window, menu bar, AirPods skip), so a reopened window and the next
     /// Start agree with what you last heard.
     private func rememberPreset(_ preset: BrainwavePreset) {
-        guard !autotestRunning, BrainwavePreset.all.contains(where: { $0.id == preset.id }) else { return }
-        UserDefaults.standard.set(preset.id, forKey: "preset")
+        guard !isSelfTesting, BrainwavePreset.all.contains(where: { $0.id == preset.id }) else { return }
+        settings.preset = preset
     }
 
-    /// Menu bar "Presets" submenu: switch the playing preset in place, or
-    /// start it fresh with the window's saved style, volume and timer.
-    func playPreset(_ preset: BrainwavePreset) {
-        if isPlaying, program == nil, let cfg = lastStartConfig {
-            if isPaused {
-                resumePlayback()
-            }
-            switchPreset(preset: preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.withNoise)
-            return
-        }
-        let defaults = UserDefaults.standard
-        let style = ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural
-        let volume = VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double)
-        let minutes = defaults.integer(forKey: "minutes")
-        start(preset: preset, style: style, volume: volume, withNoise: defaults.bool(forKey: "noise"), minutes: minutes > 0 ? minutes : nil)
-    }
+    // MARK: - Live changes
 
-    /// Runs a timed program: presets auto-advance through the click-free
-    /// crossfade, and the session stops itself when the schedule ends.
-    func startProgram(_ program: FocusProgram, style: ToneStyle, volume: Double, withNoise: Bool) {
-        stop()
-        let first = program.steps[0].preset
-        lastStartConfig = (first, style, volume, withNoise, nil)
-        guard engine.start(preset: first, style: style, volume: Float(volume), withNoise: withNoise) else {
-            lastError = Self.audioFailureMessage
-            return
-        }
-        isPlaying = true
-        lastError = nil
-        resetPauseBookkeeping()
-        isRunningProgram = true
-        if publishesNowPlaying {
-            nowPlaying.setSkipEnabled(false)
-        }
-        currentPreset = first
-        self.program = program
-        programStartedAt = Date()
-        programStep = (0, program.steps.count)
-        programTitle = programTitleString(program, index: 0)
-        sessionTitle = program.name
-        isPaused = false
-        remainingSeconds = Int(program.totalSeconds)
-        scheduleCountdown()
-        pushNowPlaying()
-    }
-
-    private func programTitleString(_ program: FocusProgram, index: Int) -> String {
-        let step = program.steps[index]
-        return "\(program.name) · \(step.preset.name) (\(Int(step.seconds / 60)) min)"
-    }
-
-    func switchPreset(
-        preset: BrainwavePreset,
-        style: ToneStyle,
-        volume: Double,
-        withNoise: Bool
-    ) {
+    func switchPreset(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool) {
         guard isPlaying else { return }
-        engine.switchTo(preset: preset, style: style, volume: Float(volume), withNoise: withNoise)
-        lastStartConfig = (preset, style, volume, withNoise, lastStartConfig?.minutes)
+        playback = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
+        // Already at the eased-out level during the final fade, so no buffer
+        // ever targets the full volume in between.
+        audio.switchTo(preset: preset, style: style, volume: Float(audibleVolume(volume)), withNoise: withNoise)
         currentPreset = preset
         if program == nil {
             // During a program the title stays "Program · Step".
@@ -226,49 +179,44 @@ final class SessionController: ObservableObject {
     /// now (counted from this moment) instead of silently waiting for the
     /// next Start. Programs have their own schedule and ignore this.
     func updateTimer(minutes: Int?) {
-        guard isPlaying, program == nil, let cfg = lastStartConfig else { return }
-        lastStartConfig = (cfg.preset, cfg.style, cfg.volume, cfg.withNoise, minutes)
-        if let minutes {
-            if isPaused {
-                pausedRemaining = Double(minutes) * 60
-                endDate = nil
-            } else {
-                endDate = Date().addingTimeInterval(Double(minutes) * 60)
-            }
-            remainingSeconds = minutes * 60
-            scheduleCountdown()
-        } else {
-            endDate = nil
-            pausedRemaining = nil
-            remainingSeconds = nil
-            timer?.invalidate()
-            timer = nil
-        }
-        lastPushedSecond = -1
+        guard isPlaying, program == nil, var clock else { return }
+        let now = self.now()
+        clock.setRemaining(minutes.map { Double($0) * 60 }, at: now)
+        self.clock = clock
+        applyEndingFade(remaining: clock.remaining(at: now))
+        publishRemaining(clock.remaining(at: now))
+        updateTicker()
         pushNowPlaying()
     }
 
-    /// Immediate volume/noise change while playing (no crossfade needed).
+    /// Immediate volume/noise change (no crossfade needed). Also fine while
+    /// stopped: the engine keeps the level for the next start.
     func updateLive(volume: Double, noiseEnabled: Bool) {
-        engine.update(volume: Float(volume), noiseEnabled: noiseEnabled)
-        if lastStartConfig != nil {
-            lastStartConfig = (lastStartConfig!.preset, lastStartConfig!.style, volume, noiseEnabled, lastStartConfig!.minutes)
+        playback?.volume = volume
+        playback?.noise = noiseEnabled
+        if isEndingFadeApplied, let clock {
+            // Keep easing out, now relative to the new level.
+            applyEndingFade(remaining: clock.remaining(at: now()))
+        } else {
+            audio.update(volume: Float(volume), noiseEnabled: noiseEnabled)
         }
     }
 
+    // MARK: - Stopping
+
     func stop() {
-        timer?.invalidate()
-        timer = nil
-        endDate = nil
-        engine.stop()
+        ticker?.invalidate()
+        ticker = nil
+        audio.stop()
         isPlaying = false
+        isPaused = false
         remainingSeconds = nil
+        clock = nil
         program = nil
         programStep = nil
         programTitle = nil
-        isPaused = false
         isRunningProgram = false
-        resetPauseBookkeeping()
+        isEndingFadeApplied = false
         if publishesNowPlaying {
             nowPlaying.setSkipEnabled(true)
             nowPlaying.clear()
@@ -279,83 +227,104 @@ final class SessionController: ObservableObject {
         lastError = nil
     }
 
-    private func resetPauseBookkeeping() {
-        pausedRemaining = nil
-        programPausedAt = nil
-        programPauseTotal = 0
-        lastPushedSecond = -1
-    }
+    // MARK: - Countdown
 
-    private func scheduleCountdown() {
-        timer?.invalidate()
-        let newTimer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.tick()
-            }
+    /// Ticks only while there is something to count down (a sleep timer or a
+    /// program). Deadline-based via the clock, so timer drift and run-loop
+    /// stalls don't accumulate.
+    private func updateTicker() {
+        guard clock?.duration != nil else {
+            ticker?.invalidate()
+            ticker = nil
+            return
+        }
+        guard ticker == nil else { return }
+        let newTicker = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
         }
         // .common mode keeps the countdown running while menus are open.
-        RunLoop.main.add(newTimer, forMode: .common)
-        timer = newTimer
+        RunLoop.main.add(newTicker, forMode: .common)
+        ticker = newTicker
     }
 
-    private func tick() {
+    /// Advance timers/programs (driven by the ticker; tests call it directly).
+    func tick() {
+        guard isPlaying, !isPaused, let clock else { return }
+        let now = self.now()
+        if clock.isFinished(at: now) {
+            stop() // fade out; stop() also clears timer and program state
+            return
+        }
         if let program {
-            tickProgram(program)
-            return
+            advanceProgram(program, elapsed: clock.elapsed(at: now))
         }
-        guard let end = endDate else { return }
-        // Deadline-based: immune to timer drift and run-loop stalls.
-        // (endDate is nil while paused, so a paused countdown stays frozen.)
-        let remaining = Int(ceil(end.timeIntervalSinceNow))
-        if remaining <= 0 {
-            stop()
-        } else {
-            remainingSeconds = remaining
-            if remaining != lastPushedSecond {
-                lastPushedSecond = remaining
-                pushNowPlaying()
-            }
+        applyEndingFade(remaining: clock.remaining(at: now))
+        publishRemaining(clock.remaining(at: now))
+    }
+
+    /// Sleep timers and programs don't end abruptly: over the last 30 s the
+    /// volume eases down to silence (then the regular stop fade follows), so
+    /// the end of a Deep Sleep timer doesn't wake you.
+    nonisolated static let endingFadeSeconds: TimeInterval = 30
+
+    /// Level multiplier with `remaining` seconds left: falls evenly in
+    /// decibels from 1 (0 dB) to 0.01 (−40 dB) over the fade, so each tick's
+    /// step is the same small ~0.7 dB instead of big jumps near the end; the
+    /// regular stop fade takes it from −40 dB to silence.
+    nonisolated static func endingFadeFactor(remaining: TimeInterval) -> Double {
+        let progress = 1 - min(max(remaining / endingFadeSeconds, 0), 1)
+        return pow(10, -2 * progress)
+    }
+
+    /// `volume` as it should sound right now: eased out near the end.
+    private func audibleVolume(_ volume: Double) -> Double {
+        guard let clock, let remaining = clock.remaining(at: now()),
+              remaining < Self.endingFadeSeconds else { return volume }
+        return volume * Self.endingFadeFactor(remaining: remaining)
+    }
+
+    private func applyEndingFade(remaining: TimeInterval?) {
+        guard let playback else { return }
+        if let remaining, remaining < Self.endingFadeSeconds {
+            let factor = Self.endingFadeFactor(remaining: remaining)
+            audio.update(volume: Float(playback.volume * factor), noiseEnabled: playback.noise)
+            isEndingFadeApplied = true
+        } else if isEndingFadeApplied {
+            // The timer was extended or removed mid-fade: back to full level.
+            audio.update(volume: Float(playback.volume), noiseEnabled: playback.noise)
+            isEndingFadeApplied = false
         }
     }
 
-    private func tickProgram(_ program: FocusProgram) {
-        guard !isPaused else { return } // paused programs freeze in place
-        let elapsed = programElapsed()
-        if elapsed >= program.totalSeconds {
-            stop() // fade out; stop() also clears the program state
-            return
+    /// The countdown ticks twice a second but its value changes once a second;
+    /// only publish real changes so observers (the window) don't redraw for
+    /// nothing.
+    private func publishRemaining(_ remaining: TimeInterval?) {
+        let seconds = remaining.map { Int(ceil($0)) }
+        if seconds != remainingSeconds {
+            remainingSeconds = seconds
         }
+    }
+
+    private func advanceProgram(_ program: FocusProgram, elapsed: TimeInterval) {
         let index = program.stepIndex(at: elapsed)
-        if index != programStep?.index {
-            programStep = (index, program.steps.count)
-            programTitle = programTitleString(program, index: index)
-            sessionTitle = programTitle!
-            let preset = program.steps[index].preset
-            if let cfg = lastStartConfig {
-                engine.switchTo(preset: preset, style: cfg.style, volume: Float(cfg.volume), withNoise: cfg.withNoise)
-                lastStartConfig = (preset, cfg.style, cfg.volume, cfg.withNoise, nil)
-                currentPreset = preset
-            }
-            if autotestRunning {
-                logAutoTest("PROGRAM_STEP \(index + 1)/\(program.steps.count) \(preset.name) -> \(autotestSnapshot())")
-            }
+        guard index != programStep?.index else { return }
+        let preset = program.steps[index].preset
+        programStep = (index, program.steps.count)
+        programTitle = Self.title(of: program, step: index)
+        sessionTitle = programTitle ?? program.name
+        if let playback {
+            audio.switchTo(preset: preset, style: playback.style, volume: Float(audibleVolume(playback.volume)), withNoise: playback.noise)
+            self.playback?.preset = preset
+            currentPreset = preset
         }
-        remainingSeconds = Int(ceil(program.totalSeconds - elapsed))
-        let second = Int(elapsed)
-        if second != lastPushedSecond {
-            lastPushedSecond = second
-            pushNowPlaying()
-        }
+        pushNowPlaying()
+        selfTest?.programStepped(to: index, of: program.steps.count, preset: preset)
     }
 
-    /// Program time actually played: wall time since start minus every pause,
-    /// including the one in progress.
-    private func programElapsed(now: Date = Date()) -> TimeInterval {
-        var paused = programPauseTotal
-        if let pausedAt = programPausedAt {
-            paused += now.timeIntervalSince(pausedAt)
-        }
-        return max(0, now.timeIntervalSince(programStartedAt) - paused)
+    private static func title(of program: FocusProgram, step index: Int) -> String {
+        let step = program.steps[index]
+        return "\(program.name) · \(step.preset.name) (\(Int(step.seconds / 60)) min)"
     }
 
     // MARK: - Playback control (AirPods / Now Playing / menu bar)
@@ -363,31 +332,16 @@ final class SessionController: ObservableObject {
     func pausePlayback() {
         guard isPlaying, !isPaused else { return }
         isPaused = true
-        if let end = endDate {
-            // Freeze the countdown: the deadline is parked while paused and
-            // reinstated with the same remaining time on resume.
-            pausedRemaining = max(0, end.timeIntervalSinceNow)
-            endDate = nil
-        }
-        if program != nil {
-            programPausedAt = Date()
-        }
-        engine.pause()
+        clock?.pause(at: now())
+        audio.pause()
         pushNowPlaying()
     }
 
     func resumePlayback() {
         guard isPlaying, isPaused else { return }
         isPaused = false
-        if let frozen = pausedRemaining {
-            endDate = Date().addingTimeInterval(frozen)
-            pausedRemaining = nil
-        }
-        if let pausedAt = programPausedAt {
-            programPauseTotal += Date().timeIntervalSince(pausedAt)
-            programPausedAt = nil
-        }
-        guard engine.restartAfterPause() else {
+        clock?.resume(at: now())
+        guard audio.restartAfterPause() else {
             stop()
             lastError = Self.audioFailureMessage
             return
@@ -409,14 +363,12 @@ final class SessionController: ObservableObject {
     }
 
     func togglePlayPause() {
-        if isPlaying {
-            if isPaused {
-                resumePlayback()
-            } else {
-                pausePlayback()
-            }
-        } else {
+        if !isPlaying {
             startLast()
+        } else if isPaused {
+            resumePlayback()
+        } else {
+            pausePlayback()
         }
     }
 
@@ -432,242 +384,46 @@ final class SessionController: ObservableObject {
     private func stepPreset(by delta: Int) {
         // A running program owns the preset sequence; skipping would fight
         // its schedule (and be undone at the next step).
-        guard isPlaying, program == nil, let cfg = lastStartConfig else { return }
+        guard isPlaying, program == nil, let playback else { return }
         let all = BrainwavePreset.all
-        guard let currentIndex = all.firstIndex(where: { $0.id == cfg.preset.id }) else { return }
+        guard let currentIndex = all.firstIndex(where: { $0.id == playback.preset.id }) else { return }
         let nextIndex = (currentIndex + delta + all.count) % all.count
-        switchPreset(preset: all[nextIndex], style: cfg.style, volume: cfg.volume, withNoise: cfg.withNoise)
+        switchPreset(preset: all[nextIndex], style: playback.style, volume: playback.volume, withNoise: playback.noise)
     }
+
+    // MARK: - Now Playing
 
     /// Self-tests stay out of Control Center / Now Playing (they would take
     /// it over from whatever you're listening to) unless asked to cover it
     /// with --autotest-now-playing.
     private var publishesNowPlaying: Bool {
-        !autotestRunning || autotestArguments.contains("--autotest-now-playing")
+        selfTest?.options.publishesNowPlaying ?? true
     }
 
+    /// Publishes title, elapsed time, duration and rate. Called on state
+    /// changes only: with a playback rate set, macOS advances the elapsed
+    /// time itself, so per-second pushes would just be extra IPC.
     private func pushNowPlaying() {
-        guard isPlaying else { return }
-        var elapsed: TimeInterval = 0
-        var duration: TimeInterval?
-        if let program {
-            duration = program.totalSeconds
-            elapsed = min(programElapsed(), program.totalSeconds)
-        } else if let minutes = lastStartConfig?.minutes {
-            let total = Double(minutes * 60)
-            duration = total
-            elapsed = max(0, total - Double(remainingSeconds ?? 0))
-        }
-        if publishesNowPlaying {
-            nowPlaying.update(title: sessionTitle, elapsed: elapsed, duration: duration, playing: true, paused: isPaused)
-        }
+        guard isPlaying, publishesNowPlaying, let clock else { return }
+        let elapsed = clock.elapsed(at: now())
+        nowPlaying.update(
+            title: sessionTitle,
+            elapsed: clock.duration.map { min(elapsed, $0) } ?? elapsed,
+            duration: clock.duration,
+            playing: true,
+            paused: isPaused
+        )
     }
 
-    // MARK: - Automated self-test (launched with --autotest)
+    // MARK: - Self-test
 
     /// Remote commands (AirPods, Control Center, or macOS handing Now Playing
     /// to another app) arrive asynchronously from outside. During a self-test
     /// they would make results depend on whatever else the Mac is doing, so
     /// they are logged and ignored.
     func shouldHandleRemoteCommand(_ name: String) -> Bool {
-        guard autotestRunning else { return true }
-        logAutoTest("REMOTE_COMMAND_IGNORED \(name)")
+        guard let selfTest else { return true }
+        selfTest.remoteCommandIgnored(name)
         return false
-    }
-
-    func runAutoTest(
-        totalSeconds: Int,
-        cycleSeconds: Int,
-        timerMinutes: Int?,
-        stopAtSeconds: Int,
-        volume: Double,
-        programSeconds: Int,
-        arguments: [String] = []
-    ) {
-        guard !autotestRunning else { return }
-        setvbuf(stdout, nil, _IOLBF, 0)
-        autotestArguments = arguments
-        autotestRunning = true
-        autotestConfigIndex = 0
-        autotestStartedAt = Date()
-        autotestLastCycle = Date()
-        autotestTotal = totalSeconds
-        autotestCycle = max(2, cycleSeconds)
-        autotestTimerMinutes = timerMinutes
-        autotestStopAt = stopAtSeconds
-        autotestStopPerformed = false
-        autotestTimerVerified = false
-        autotestVolume = volume
-        autotestProgram = programSeconds > 0
-        autotestPauseAt = intArgument(arguments, name: "--autotest-pause-at", fallback: 0)
-        autotestResumeAt = intArgument(arguments, name: "--autotest-resume-at", fallback: 0)
-        autotestPausePerformed = false
-        autotestResumePerformed = false
-        autotestDeviceChangeAt = intArgument(arguments, name: "--autotest-device-change-at", fallback: 0)
-        autotestDeviceChangePerformed = false
-
-        let first = Self.autotestConfigs[0]
-        if autotestProgram {
-            let third = max(3, programSeconds / 3)
-            let prog = FocusProgram(
-                id: "autotest",
-                name: "Autotest Program",
-                detail: "",
-                steps: [
-                    FocusProgram.ProgramStep(preset: BrainwavePreset.all.first { $0.id == "relax" }!, seconds: TimeInterval(third)),
-                    FocusProgram.ProgramStep(preset: BrainwavePreset.all.first { $0.id == "focus" }!, seconds: TimeInterval(third)),
-                    FocusProgram.ProgramStep(preset: BrainwavePreset.all.first { $0.id == "peak" }!, seconds: TimeInterval(programSeconds - 2 * third))
-                ]
-            )
-            startProgram(prog, style: .binaural, volume: volume, withNoise: true)
-            logAutoTest("START_PROGRAM -> \(autotestSnapshot())")
-        } else if let minutes = timerMinutes {
-            start(
-                preset: first.preset,
-                style: first.style,
-                volume: volume,
-                withNoise: first.noise,
-                minutes: minutes
-            )
-            logAutoTest("START_WITH_TIMER \(minutes)m -> \(autotestSnapshot())")
-        } else {
-            autotestApplyConfig(volume: volume)
-            logAutoTest("START -> \(autotestSnapshot())")
-        }
-
-        autotestTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.autotestTick()
-            }
-        }
-    }
-
-    private func autotestTick() {
-        let elapsed = Date().timeIntervalSince(autotestStartedAt)
-
-        if autotestTimerMinutes != nil, !autotestTimerVerified, !isPlaying, !autotestStopPerformed, !autotestProgram {
-            autotestTimerVerified = true
-            logAutoTest("TIMER_STOP_VERIFIED at \(Int(elapsed))s -> \(autotestSnapshot())")
-            if elapsed < Double(autotestTotal) - 8 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    guard let self else { return }
-                    self.autotestApplyConfig(volume: self.autotestVolume)
-                    self.logAutoTest("RESTART_AFTER_TIMER -> \(self.autotestSnapshot())")
-                }
-            }
-        }
-
-        if autotestStopAt > 0, !autotestStopPerformed, !autotestProgram, Int(elapsed) >= autotestStopAt {
-            autotestStopPerformed = true
-            logAutoTest("MANUAL_STOP at \(autotestStopAt)s -> \(autotestSnapshot())")
-            stop()
-            if elapsed < Double(autotestTotal) - 8 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    guard let self else { return }
-                    self.autotestConfigIndex += 1
-                    self.autotestApplyConfig(volume: self.autotestVolume)
-                    self.logAutoTest("RESTART_AFTER_STOP -> \(self.autotestSnapshot())")
-                }
-            }
-        }
-
-        // Preset cycling continues after stop/restart so the whole matrix is
-        // exercised across the run (previously it stopped after a manual stop).
-        if elapsed - autotestLastCycle.timeIntervalSince(autotestStartedAt) >= Double(autotestCycle),
-           isPlaying, !isPaused, !autotestProgram {
-            autotestLastCycle = Date()
-            autotestConfigIndex += 1
-            let config = Self.autotestConfigs[autotestConfigIndex % Self.autotestConfigs.count]
-            if autotestConfigIndex % 3 == 2 {
-                let newVolume = Float(autotestVolume * (0.7 + 0.15 * Double(autotestConfigIndex % 4)))
-                engine.update(volume: newVolume, noiseEnabled: config.noise)
-                logAutoTest("LIVE_UPDATE volume=\(newVolume) noise=\(config.noise)")
-            } else {
-                autotestApplyConfig(volume: autotestVolume)
-            }
-            logAutoTest("cycle diag -> \(autotestSnapshot())")
-        }
-
-        if autotestPauseAt > 0, !autotestPausePerformed, Int(elapsed) >= autotestPauseAt, isPlaying, !isPaused {
-            autotestPausePerformed = true
-            pausePlayback()
-            logAutoTest("AUTOTEST_PAUSE at \(Int(elapsed))s -> \(autotestSnapshot())")
-        }
-
-        if autotestResumeAt > 0, !autotestResumePerformed, Int(elapsed) >= autotestResumeAt, isPlaying, isPaused {
-            autotestResumePerformed = true
-            resumePlayback()
-            logAutoTest("AUTOTEST_RESUME at \(Int(elapsed))s -> \(autotestSnapshot())")
-        }
-
-        if autotestDeviceChangeAt > 0, !autotestDeviceChangePerformed, Int(elapsed) >= autotestDeviceChangeAt, isPlaying {
-            autotestDeviceChangePerformed = true
-            // A burst, like a real device switch: must coalesce to one rebuild.
-            engine.simulateConfigurationChange()
-            engine.simulateConfigurationChange()
-            engine.simulateConfigurationChange()
-            logAutoTest("AUTOTEST_DEVICE_CHANGE at \(Int(elapsed))s -> \(autotestSnapshot())")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
-                guard let self else { return }
-                let ok = self.isPlaying && self.engine.deviceRebuilds == 1 && self.engine.diagnostics.gain > 0.9
-                self.logAutoTest("DEVICE_CHECK \(ok ? "ok" : "FAIL") rebuilds=\(self.engine.deviceRebuilds) -> \(self.autotestSnapshot())")
-            }
-        }
-
-        if elapsed >= Double(autotestTotal) {
-            autotestTimer?.invalidate()
-            autotestTimer = nil
-            stop()
-            logAutoTest("AUTOTEST_COMPLETE total=\(Int(elapsed))s -> \(autotestSnapshot())")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                // Every requested preset/style change must reach the render
-                // thread (a lost update here once dropped ~30% of switches).
-                if let self {
-                    let (requested, coalesced) = self.engine.switchRequests
-                    let applied = self.engine.diagnostics.switches
-                    let ok = requested == applied + coalesced
-                    self.logAutoTest("SWITCH_CHECK \(ok ? "ok" : "MISMATCH") requested=\(requested) applied=\(applied) coalesced=\(coalesced)")
-                }
-                exit(0)
-            }
-        }
-    }
-
-    private func autotestApplyConfig(volume: Double) {
-        let config = Self.autotestConfigs[autotestConfigIndex % Self.autotestConfigs.count]
-        if engine.isPlaying {
-            // Exercises the live crossfade-switch path.
-            engine.switchTo(preset: config.preset, style: config.style, volume: Float(volume), withNoise: config.noise)
-        } else {
-            _ = engine.start(preset: config.preset, style: config.style, volume: Float(volume), withNoise: config.noise)
-        }
-        isPlaying = engine.isPlaying
-        logAutoTest("switch -> \(config.preset.name)/\(config.style.rawValue)/noise=\(config.noise) volume=\(volume)")
-    }
-
-    private func autotestSnapshot() -> String {
-        let diagnostics = engine.diagnostics
-        return "frames=\(diagnostics.frames) nan=\(diagnostics.nan) clips=\(diagnostics.clips) switches=\(diagnostics.switches) gain=\(String(format: "%.2f", diagnostics.gain)) playing=\(isPlaying)"
-    }
-
-    private func intArgument(_ arguments: [String], name: String, fallback: Int) -> Int {
-        guard let raw = argumentValue(arguments, name: name) else { return fallback }
-        return Int(raw) ?? fallback
-    }
-
-    private func argumentValue(_ arguments: [String], name: String) -> String? {
-        if let equalsForm = arguments.first(where: { $0.hasPrefix(name + "=") }) {
-            return String(equalsForm.dropFirst(name.count + 1))
-        }
-        if let index = arguments.firstIndex(of: name), index + 1 < arguments.count {
-            return arguments[index + 1]
-        }
-        return nil
-    }
-
-    private func logAutoTest(_ message: String) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        print("[autotest \(formatter.string(from: Date()))] \(message)")
     }
 }

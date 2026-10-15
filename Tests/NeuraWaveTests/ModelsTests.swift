@@ -51,4 +51,14 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(VolumeLevel.sanitized(-1), 0.05)
         XCTAssertEqual(VolumeLevel.sanitized(0.5), 0.5)
     }
+
+    func testDisplayStrings() {
+        XCTAssertEqual(BrainwavePreset.byId("deep-sleep").beatLabel, "2.5 Hz")
+        XCTAssertEqual(BrainwavePreset.byId("peak").beatLabel, "40 Hz")
+        XCTAssertEqual(FocusProgram.all.first { $0.id == "coding" }?.bandSummary, "Beta→Gamma→Alpha")
+        XCTAssertEqual(TimeFormat.clock(0), "00:00")
+        XCTAssertEqual(TimeFormat.clock(65), "01:05")
+        XCTAssertEqual(TimeFormat.clock(90 * 60), "90:00")
+        XCTAssertEqual(TimeFormat.clock(-3), "00:00")
+    }
 }
