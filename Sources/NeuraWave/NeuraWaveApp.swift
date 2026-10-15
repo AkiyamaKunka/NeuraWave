@@ -101,7 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let session = SessionController.shared
         guard session.audio.isAudible else { return .terminateNow }
         session.audio.update(volume: 0, noiseEnabled: false)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        // ~1–2 output buffers to pick up the zero, plus the 25 ms glide.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             session.stop()
             sender.reply(toApplicationShouldTerminate: true)
         }
