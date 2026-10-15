@@ -85,6 +85,7 @@ final class AudioEngine {
             engine.connect(node, to: engine.mainMixerNode, format: format)
             sourceNode = node
             nodeSampleRate = sampleRate
+            requestLargeIOBuffer()
         }
 
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
@@ -240,6 +241,33 @@ final class AudioEngine {
             isPlaying = false
             onOutputFailure?()
         }
+    }
+
+    /// Steady tones don't need low latency: up to a ~43 ms IO buffer (2048
+    /// frames at 48 kHz, less where the device caps it) instead of the
+    /// default ~11 ms means far fewer audio wakeups, for less CPU and energy. Switches and pauses are fades of
+    /// 60 ms or more anyway. Best effort: the device may clamp or refuse it.
+    private func requestLargeIOBuffer() {
+        guard let unit = engine.outputNode.audioUnit else { return }
+        // Stay inside what the device allows (Bluetooth outputs such as
+        // AirPods cap it, e.g. at 960 frames ≈ 20 ms; still fewer wakeups).
+        var range = AudioValueRange()
+        var rangeSize = UInt32(MemoryLayout<AudioValueRange>.size)
+        let gotRange = AudioUnitGetProperty(
+            unit, kAudioDevicePropertyBufferFrameSizeRange, kAudioUnitScope_Global, 0, &range, &rangeSize
+        ) == noErr
+        var frames: UInt32 = 2048
+        if gotRange, range.mMaximum > 0 {
+            frames = UInt32(min(max(Double(frames), range.mMinimum), range.mMaximum))
+        }
+        AudioUnitSetProperty(
+            unit,
+            kAudioDevicePropertyBufferFrameSize,
+            kAudioUnitScope_Global,
+            0,
+            &frames,
+            UInt32(MemoryLayout<UInt32>.size)
+        )
     }
 
     private func beginKeepAwake() {

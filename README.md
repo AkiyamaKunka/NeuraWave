@@ -87,6 +87,9 @@ What changed between versions is in [CHANGELOG.md](CHANGELOG.md).
 
 ## 🗂 Code map
 
+How the pieces fit together (threads, the audio handoff, fades) is in
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
 | File | What lives there |
 | --- | --- |
 | `Models.swift` | Presets, focus programs, tone styles, volume range, time formatting |

@@ -12,6 +12,7 @@ LOGDIR="$ROOT/test-results"
 # for a silent battery.
 read -r -a EXTRA <<< "${AUTOTEST_EXTRA_ARGS:-}"
 mkdir -p "$LOGDIR"
+FAILED=0
 
 # Pass = run completed, every requested switch reached the audio, and no
 # in-run check (DEVICE_CHECK, WINDOW_CHECK, …) reported a failure.
@@ -43,6 +44,7 @@ run_scenario() {
     echo "PASS $name"
   else
     echo "FAIL $name"
+    FAILED=1
     tail -5 "$log"
   fi
 
@@ -81,6 +83,7 @@ if scenario_passed "$LOG01"; then
   echo "PASS 01-basic"
 else
   echo "FAIL 01-basic"
+  FAILED=1
   tail -5 "$LOG01"
 fi
 kill "$PID01" 2>/dev/null || true
@@ -88,7 +91,7 @@ wait "$PID01" 2>/dev/null || true
 
 # Every short scenario, in parallel, against the packaged app.
 if NEURAWAVE_BIN="$BIN" QUICK_TESTS_LOGDIR="$LOGDIR/quick" \
-   bash scripts/quick-tests.sh ${EXTRA[@]+"${EXTRA[@]}"}; then :; fi
+   bash scripts/quick-tests.sh ${EXTRA[@]+"${EXTRA[@]}"}; then :; else FAILED=1; fi
 
 run_scenario "12-window-reopen" 30 --autotest --autotest-seconds 8 --autotest-cycle 50 --autotest-window-check
 
@@ -125,9 +128,15 @@ if scenario_passed "$LOGDIR/04-endurance.log"; then
   echo "PASS 04-endurance"
 else
   echo "FAIL 04-endurance"
+  FAILED=1
   tail -5 "$LOGDIR/04-endurance.log"
 fi
 kill "$ENDURANCE_PID" 2>/dev/null || true
 kill "$PERF_PID" 2>/dev/null || true
 wait "$ENDURANCE_PID" 2>/dev/null || true
 wait "$PERF_PID" 2>/dev/null || true
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "SOME SCENARIOS FAILED"
+fi
+exit "$FAILED"
