@@ -106,7 +106,7 @@ final class SessionController: ObservableObject {
     private func begin(_ config: PlaybackConfig, duration: TimeInterval?) -> Bool {
         stop()
         playback = config
-        guard audio.start(preset: config.preset, style: config.style, volume: Float(config.volume), withNoise: config.noise) else {
+        guard audio.start(preset: config.preset, style: config.style, volume: Self.amplitude(config.volume), withNoise: config.noise) else {
             lastError = Self.audioFailureMessage
             return false
         }
@@ -165,7 +165,7 @@ final class SessionController: ObservableObject {
         playback = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
         // Already at the eased-out level during the final fade, so no buffer
         // ever targets the full volume in between.
-        audio.switchTo(preset: preset, style: style, volume: Float(audibleVolume(volume)), withNoise: withNoise)
+        audio.switchTo(preset: preset, style: style, volume: audibleAmplitude(volume), withNoise: withNoise)
         currentPreset = preset
         if program == nil {
             // During a program the title stays "Program · Step".
@@ -198,7 +198,7 @@ final class SessionController: ObservableObject {
             // Keep easing out, now relative to the new level.
             applyEndingFade(remaining: clock.remaining(at: now()))
         } else {
-            audio.update(volume: Float(volume), noiseEnabled: noiseEnabled)
+            audio.update(volume: Self.amplitude(volume), noiseEnabled: noiseEnabled)
         }
     }
 
@@ -276,22 +276,32 @@ final class SessionController: ObservableObject {
         return pow(10, -2 * progress)
     }
 
-    /// `volume` as it should sound right now: eased out near the end.
-    private func audibleVolume(_ volume: Double) -> Double {
+    /// Output amplitude for slider position `volume` right now: eased out
+    /// near the end.
+    private func audibleAmplitude(_ volume: Double) -> Float {
         guard let clock, let remaining = clock.remaining(at: now()),
-              remaining < Self.endingFadeSeconds else { return volume }
-        return volume * Self.endingFadeFactor(remaining: remaining)
+              remaining < Self.endingFadeSeconds else { return Self.amplitude(volume) }
+        return Self.amplitude(volume) * Float(Self.endingFadeFactor(remaining: remaining))
+    }
+
+    /// Volume slider position (0.05–1) → output amplitude. Loudness is
+    /// roughly logarithmic in amplitude, so a squared curve makes equal
+    /// slider moves feel like equal loudness steps and gives the quiet end
+    /// (sleep) much finer control. 1 stays full level.
+    nonisolated static func amplitude(_ sliderPosition: Double) -> Float {
+        let position = Float(min(max(sliderPosition, 0), 1))
+        return position * position
     }
 
     private func applyEndingFade(remaining: TimeInterval?) {
         guard let playback else { return }
         if let remaining, remaining < Self.endingFadeSeconds {
             let factor = Self.endingFadeFactor(remaining: remaining)
-            audio.update(volume: Float(playback.volume * factor), noiseEnabled: playback.noise)
+            audio.update(volume: Self.amplitude(playback.volume) * Float(factor), noiseEnabled: playback.noise)
             isEndingFadeApplied = true
         } else if isEndingFadeApplied {
             // The timer was extended or removed mid-fade: back to full level.
-            audio.update(volume: Float(playback.volume), noiseEnabled: playback.noise)
+            audio.update(volume: Self.amplitude(playback.volume), noiseEnabled: playback.noise)
             isEndingFadeApplied = false
         }
     }
@@ -314,7 +324,7 @@ final class SessionController: ObservableObject {
         programTitle = Self.title(of: program, step: index)
         sessionTitle = programTitle ?? program.name
         if let playback {
-            audio.switchTo(preset: preset, style: playback.style, volume: Float(audibleVolume(playback.volume)), withNoise: playback.noise)
+            audio.switchTo(preset: preset, style: playback.style, volume: audibleAmplitude(playback.volume), withNoise: playback.noise)
             self.playback?.preset = preset
             currentPreset = preset
         }

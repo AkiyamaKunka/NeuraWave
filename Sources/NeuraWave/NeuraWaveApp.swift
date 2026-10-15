@@ -8,7 +8,11 @@ struct NeuraWaveApp: App {
     init() {
         // Before any scene or view reads settings. Self-tests never touch them.
         if AutoTestOptions(arguments: ProcessInfo.processInfo.arguments) == nil {
-            SettingsStore.standard.keepEarlierDefaultVolumeIfNeeded()
+            let settings = SettingsStore.standard
+            // Order matters: settle the pre-1.5 default first (a linear
+            // value), then convert saved volumes to the new curve.
+            settings.keepEarlierDefaultVolumeIfNeeded()
+            settings.migrateVolumeCurveIfNeeded()
         }
     }
 

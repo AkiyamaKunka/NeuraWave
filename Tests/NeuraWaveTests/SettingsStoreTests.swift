@@ -73,6 +73,21 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.volume, 1)
     }
 
+    func testVolumeCurveMigrationKeepsTheSameLoudnessOnce() {
+        defaults.set(0.25, forKey: "volume") // old linear amplitude
+        let store = SettingsStore(defaults: defaults)
+        store.migrateVolumeCurveIfNeeded()
+        XCTAssertEqual(store.volume, 0.5, accuracy: 1e-9, "√0.25: same amplitude on the new curve")
+        XCTAssertEqual(Double(SessionController.amplitude(store.volume)), 0.25, accuracy: 1e-6)
+        store.migrateVolumeCurveIfNeeded() // second launch: untouched
+        XCTAssertEqual(store.volume, 0.5, accuracy: 1e-9)
+    }
+
+    func testDefaultSliderPositionGivesTheDefaultLoudness() {
+        // 0.385 output: the softer default from 1.5.0 (1.4.0 used 0.55).
+        XCTAssertEqual(Double(SessionController.amplitude(VolumeLevel.defaultValue)), 0.385, accuracy: 0.002)
+    }
+
     func testDetectsSettingsFromAnEarlierVersion() {
         let store = SettingsStore(defaults: defaults)
         XCTAssertFalse(store.hasEarlierVersionSettings, "fresh install")
@@ -97,5 +112,13 @@ final class SettingsStoreTests: XCTestCase {
         store.preset = BrainwavePreset.byId("relax") // later launches never apply it
         store.keepEarlierDefaultVolumeIfNeeded()
         XCTAssertEqual(store.volume, VolumeLevel.defaultValue)
+    }
+
+    func testUpdaterWithoutSavedVolumeKeepsTheSameLoudnessOnTheNewCurve() {
+        defaults.set("relax", forKey: "preset")
+        let store = SettingsStore(defaults: defaults)
+        store.keepEarlierDefaultVolumeIfNeeded()
+        store.migrateVolumeCurveIfNeeded()
+        XCTAssertEqual(Double(SessionController.amplitude(store.volume)), 0.55, accuracy: 1e-6)
     }
 }
