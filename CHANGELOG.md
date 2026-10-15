@@ -30,7 +30,7 @@
 - New `scripts/make-dmg.sh`: builds a drag-to-Applications DMG (refuses to overwrite an existing one).
 
 ### Changed
-- **Audio rendering:** about 17× cheaper (phasor oscillators instead of per-sample `sin()`); render cost is about 0.03% of real time. A larger output buffer (2048 frames) cuts audio wakeups by three quarters.
+- **Audio rendering:** about 17× cheaper (phasor oscillators instead of per-sample `sin()`); render cost is about 0.03% of real time. A larger output buffer (2048 frames, or the device's maximum, e.g. 960 on AirPods) means far fewer audio wakeups.
 - **Code structure:** split into small, documented types:
   - `SessionClock`, `SettingsStore`;
   - `Voice`, `GainFader`, `LevelSmoother`, `NoiseGenerator`;
