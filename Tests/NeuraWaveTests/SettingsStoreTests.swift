@@ -83,7 +83,15 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.volume, 0.5, accuracy: 1e-9)
     }
 
-    func testFreshInstallDefaultKeepsTheOriginalLoudness() {
+    func testDefaultSliderPositionGivesTheDefaultLoudness() {
+        // 0.385 output: the softer default from 1.5.0 (1.4.0 used 0.55).
         XCTAssertEqual(Double(SessionController.amplitude(VolumeLevel.defaultValue)), 0.385, accuracy: 0.002)
+    }
+
+    func testDetectsSettingsFromAnEarlierVersion() {
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.hasEarlierVersionSettings, "fresh install")
+        defaults.set("relax", forKey: "preset")
+        XCTAssertTrue(store.hasEarlierVersionSettings)
     }
 }

@@ -76,6 +76,12 @@ struct SettingsStore {
         nonmutating set { defaults.set(newValue?.id ?? "", forKey: Key.program) }
     }
 
+    /// Settings saved by an earlier version exist (this isn't a fresh install).
+    var hasEarlierVersionSettings: Bool {
+        [Key.preset, Key.style, Key.volume, Key.program, Key.minutes, Key.noise]
+            .contains { defaults.object(forKey: $0) != nil }
+    }
+
     var didApplyDefaultLoginItem: Bool {
         get { defaults.bool(forKey: Key.didApplyDefaultLoginItem) }
         nonmutating set { defaults.set(newValue, forKey: Key.didApplyDefaultLoginItem) }

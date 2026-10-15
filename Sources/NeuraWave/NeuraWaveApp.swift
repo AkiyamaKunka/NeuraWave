@@ -5,6 +5,14 @@ import SwiftUI
 struct NeuraWaveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        // Runs before any scene or view exists, so the window never reads a
+        // volume saved on the old linear curve. Self-tests never touch settings.
+        if AutoTestOptions(arguments: ProcessInfo.processInfo.arguments) == nil {
+            SettingsStore.standard.migrateVolumeCurveIfNeeded()
+        }
+    }
+
     var body: some Scene {
         // A single-instance Window (not a WindowGroup): "Show Window" can
         // always bring back the one main window, even after it was closed.
@@ -25,10 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         launchedAtLogin = LoginItem.isHandlingLoginLaunch()
-        // Before any window reads settings. Self-tests never touch them.
-        if AutoTestOptions(arguments: ProcessInfo.processInfo.arguments) == nil {
-            SettingsStore.standard.migrateVolumeCurveIfNeeded()
-        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

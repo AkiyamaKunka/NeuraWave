@@ -92,8 +92,8 @@ struct BrainwavePreset: Identifiable, Hashable {
 /// value, a hand-edited plist) is pulled back into it.
 enum VolumeLevel {
     static let range: ClosedRange<Double> = 0.05...1.0
-    /// Slider position (squared to amplitude): ≈0.385 output, the original
-    /// default loudness.
+    /// Slider position (squared to amplitude): ≈0.385 output, the default
+    /// loudness on the linear slider just before this change.
     static let defaultValue = 0.62
 
     static func sanitized(_ value: Double?) -> Double {
