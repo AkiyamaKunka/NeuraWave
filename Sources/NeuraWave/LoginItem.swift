@@ -38,6 +38,12 @@ enum LoginItem {
     static func applyDefaultIfNeeded(settings: SettingsStore = .standard) {
         guard !settings.didApplyDefaultLoginItem else { return }
         let service = SMAppService.mainApp
+        if settings.hasEarlierVersionSettings, service.status != .enabled {
+            // Updating from a version that didn't record this: someone who
+            // had turned it off keeps it off. Only fresh installs default on.
+            settings.didApplyDefaultLoginItem = true
+            return
+        }
         if service.status != .enabled {
             try? service.register()
         }
