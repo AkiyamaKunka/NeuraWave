@@ -5,6 +5,13 @@ import SwiftUI
 struct NeuraWaveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        // Before any scene or view reads settings. Self-tests never touch them.
+        if AutoTestOptions(arguments: ProcessInfo.processInfo.arguments) == nil {
+            SettingsStore.standard.keepEarlierDefaultVolumeIfNeeded()
+        }
+    }
+
     var body: some Scene {
         // A single-instance Window (not a WindowGroup): "Show Window" can
         // always bring back the one main window, even after it was closed.
