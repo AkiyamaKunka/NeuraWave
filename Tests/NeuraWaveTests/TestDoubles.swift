@@ -26,7 +26,12 @@ final class FakeAudio: AudioOutput {
         lastStyle = style
     }
 
-    func update(volume: Float, noiseEnabled: Bool) { log.append("update \(volume)") }
+    private(set) var lastUpdatedVolume: Float?
+
+    func update(volume: Float, noiseEnabled: Bool) {
+        log.append("update \(volume)")
+        lastUpdatedVolume = volume
+    }
     func pause() { log.append("pause") }
 
     func restartAfterPause() -> Bool {
