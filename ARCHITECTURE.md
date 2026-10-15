@@ -78,6 +78,9 @@ a request. Ownership is split:
 
 ## UI cost
 
+- **Audio wakeups:** the output asks for 2048-frame buffers (~43 ms) instead
+  of the default ~11 ms. Steady tones don't need low latency, and the fades
+  are longer than the buffer anyway.
 - **Waveform:** Core Animation shape layers slide in a repeating animation
   run by the system. The app does no per-frame work, and hidden windows cost
   nothing.

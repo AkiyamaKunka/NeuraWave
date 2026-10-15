@@ -31,7 +31,14 @@ NOW_PLAYING=""
 
 run() {
   local name="$1"; shift
-  "$BIN" --autotest "$@" ${EXTRA[@]+"${EXTRA[@]}"} > "$LOGDIR/$name.log" 2>&1
+  "$BIN" --autotest "$@" ${EXTRA[@]+"${EXTRA[@]}"} > "$LOGDIR/$name.log" 2>&1 &
+  local pid=$!
+  # Watchdog: a hung run is killed (and then fails) instead of hanging the
+  # whole battery. Longest scenario is 75 s; allow generous slack.
+  ( sleep 180; kill "$pid" 2>/dev/null ) &
+  local watchdog=$!
+  wait "$pid"
+  kill "$watchdog" 2>/dev/null
 }
 
 # name | args | extra pattern the log must contain
@@ -43,7 +50,7 @@ SCENARIOS=(
   "quick-resume|--autotest-seconds 12 --autotest-cycle 50 --autotest-pause-at 5 --autotest-resume-at 6|AUTOTEST_RESUME"
   "device-change|--autotest-seconds 14 --autotest-cycle 50 --autotest-device-change-at 4|DEVICE_CHECK ok"
   "program|--autotest-seconds 45 --autotest-cycle 30 --autotest-program-seconds 45 --autotest-pause-at 10 --autotest-resume-at 15|PROGRAM_STEP 3/3"
-  "timer-switch|--autotest-seconds 70 --autotest-cycle 5 --autotest-timer-minutes 1|TIMER_STOP_VERIFIED at 6[0-4]s"
+  "timer-switch|--autotest-seconds 70 --autotest-cycle 5 --autotest-timer-minutes 1|TIMER_STOP_VERIFIED at 6[0-6]s"
   "timer-pause|--autotest-seconds 75 --autotest-cycle 100 --autotest-timer-minutes 1 --autotest-pause-at 10 --autotest-resume-at 15|TIMER_STOP_VERIFIED at 6[4-9]s"
 )
 

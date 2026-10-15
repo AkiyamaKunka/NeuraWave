@@ -45,13 +45,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             }
             .store(in: &cancellables)
         // If the session starts, stops or pauses while the menu is open (timer
-        // runs out, AirPods), rebuild it so it never shows stale items.
+        // runs out, AirPods), close the menu rather than leave stale items, or
+        // shift items under the pointer by rebuilding it in place.
         session.$isPlaying.combineLatest(session.$isPaused)
             .dropFirst()
             .sink { [weak self] _, _ in
                 DispatchQueue.main.async {
-                    guard let self, self.isMenuOpen, let menu = self.statusItem.menu else { return }
-                    self.rebuild(menu)
+                    guard let self, self.isMenuOpen else { return }
+                    self.statusItem.menu?.cancelTracking()
                 }
             }
             .store(in: &cancellables)

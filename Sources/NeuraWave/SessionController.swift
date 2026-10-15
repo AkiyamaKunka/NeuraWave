@@ -265,14 +265,23 @@ final class SessionController: ObservableObject {
     /// Sleep timers and programs don't end abruptly: over the last 30 s the
     /// volume eases down to silence (then the regular stop fade follows), so
     /// the end of a Deep Sleep timer doesn't wake you.
-    static let endingFadeSeconds: TimeInterval = 30
+    nonisolated static let endingFadeSeconds: TimeInterval = 30
+
+    /// Level multiplier with `remaining` seconds left: falls evenly in
+    /// decibels from 1 (0 dB) to 0.01 (−40 dB) over the fade, so each tick's
+    /// step is the same small ~0.7 dB instead of big jumps near the end; the
+    /// regular stop fade takes it from −40 dB to silence.
+    nonisolated static func endingFadeFactor(remaining: TimeInterval) -> Double {
+        let progress = 1 - min(max(remaining / endingFadeSeconds, 0), 1)
+        return pow(10, -2 * progress)
+    }
 
     /// Output amplitude for slider position `volume` right now: eased out
     /// near the end.
     private func audibleAmplitude(_ volume: Double) -> Float {
         guard let clock, let remaining = clock.remaining(at: now()),
               remaining < Self.endingFadeSeconds else { return Self.amplitude(volume) }
-        return Self.amplitude(volume) * Float(max(0, remaining / Self.endingFadeSeconds))
+        return Self.amplitude(volume) * Float(Self.endingFadeFactor(remaining: remaining))
     }
 
     /// Volume slider position (0.05–1) → output amplitude. Loudness is
@@ -287,7 +296,7 @@ final class SessionController: ObservableObject {
     private func applyEndingFade(remaining: TimeInterval?) {
         guard let playback else { return }
         if let remaining, remaining < Self.endingFadeSeconds {
-            let factor = max(0, remaining / Self.endingFadeSeconds)
+            let factor = Self.endingFadeFactor(remaining: remaining)
             audio.update(volume: Self.amplitude(playback.volume) * Float(factor), noiseEnabled: playback.noise)
             isEndingFadeApplied = true
         } else if isEndingFadeApplied {

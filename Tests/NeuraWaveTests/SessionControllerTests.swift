@@ -73,13 +73,25 @@ final class SessionControllerTests: XCTestCase {
         session.start(preset: preset("deep-sleep"), style: .binaural, volume: 0.4, withNoise: false, minutes: 1)
         advance(29)
         XCTAssertFalse(audio.log.contains { $0.hasPrefix("update") }, "full level until the last 30 s")
-        advance(16) // 15 s left: half way down
+        advance(16) // 15 s left: half way through the fade = −20 dB
         let amp = SessionController.amplitude
-        XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.4) * 0.5, accuracy: 0.0001)
+        XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.4) * 0.1, accuracy: 0.0001)
         session.updateLive(volume: 0.8, noiseEnabled: false)
-        XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.8) * 0.5, accuracy: 0.0001, "a new level keeps easing out")
+        XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.8) * 0.1, accuracy: 0.0001, "a new level keeps easing out")
         session.updateTimer(minutes: 15)
         XCTAssertEqual(audio.lastUpdatedVolume ?? -1, amp(0.8), accuracy: 0.0001, "extending the timer restores the level")
+    }
+
+    func testEndingFadeFallsEvenlyInDecibels() {
+        let f = SessionController.endingFadeFactor
+        XCTAssertEqual(f(30), 1, accuracy: 1e-9)
+        XCTAssertEqual(f(15), 0.1, accuracy: 1e-9)
+        XCTAssertEqual(f(0), 0.01, accuracy: 1e-9)
+        // Each half-second tick changes the level by the same ~0.67 dB.
+        let step1 = 20 * log10(f(29.5) / f(30))
+        let step2 = 20 * log10(f(0) / f(0.5))
+        XCTAssertEqual(step1, step2, accuracy: 1e-6)
+        XCTAssertEqual(step1, -40.0 / 60, accuracy: 1e-6)
     }
 
     func testChangingTheTimerMidSessionAppliesNow() {
