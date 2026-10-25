@@ -1,15 +1,15 @@
 import SwiftUI
 
-struct BrainwavePreset: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let band: String
-    let beat: Double
-    let carrier: Double
-    let detail: String
-    let color: Color
+public struct BrainwavePreset: Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let band: String
+    public let beat: Double
+    public let carrier: Double
+    public let detail: String
+    public let color: Color
 
-    static let all: [BrainwavePreset] = [
+    public static let all: [BrainwavePreset] = [
         BrainwavePreset(
             id: "deep-sleep",
             name: "Deep Sleep",
@@ -67,7 +67,7 @@ struct BrainwavePreset: Identifiable, Hashable {
     ]
 
     /// "2.5 Hz", "16 Hz".
-    var beatLabel: String {
+    public var beatLabel: String {
         let number = beat == beat.rounded() ? String(Int(beat)) : String(format: "%.1f", beat)
         return number + " Hz"
     }
@@ -75,7 +75,7 @@ struct BrainwavePreset: Identifiable, Hashable {
     /// Non-fatal lookup: an id that no longer exists (corrupted defaults,
     /// hand-written argument) falls back to a neutral preset instead of
     /// crashing the app on a force-unwrap.
-    static func byId(_ id: String) -> BrainwavePreset {
+    public static func byId(_ id: String) -> BrainwavePreset {
         all.first { $0.id == id } ?? BrainwavePreset(
             id: "unknown",
             name: "Unknown",
@@ -90,11 +90,11 @@ struct BrainwavePreset: Identifiable, Hashable {
 
 /// Volume range the UI offers; anything else in saved settings (a bad
 /// value, a hand-edited plist) is pulled back into it.
-enum VolumeLevel {
-    static let range: ClosedRange<Double> = 0.05...1.0
-    static let defaultValue = 0.385
+public enum VolumeLevel {
+    public static let range: ClosedRange<Double> = 0.05...1.0
+    public static let defaultValue = 0.385
 
-    static func sanitized(_ value: Double?) -> Double {
+    public static func sanitized(_ value: Double?) -> Double {
         guard let value, value.isFinite else { return defaultValue }
         return min(max(value, range.lowerBound), range.upperBound)
     }
@@ -104,25 +104,37 @@ enum VolumeLevel {
 /// Step design follows the evidence in RESEARCH.md: settle-in phases before
 /// demanding work (Garcia-Argibay 2019), alpha gating (Klimesch 2012),
 /// gamma via isochronic-favoring steps (ASSR literature), theta only in rest.
-struct FocusProgram: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let detail: String
-    let steps: [ProgramStep]
+public struct FocusProgram: Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let detail: String
+    public let steps: [ProgramStep]
 
-    struct ProgramStep: Hashable {
-        let preset: BrainwavePreset
-        let seconds: TimeInterval
+    public init(id: String, name: String, detail: String, steps: [ProgramStep]) {
+        self.id = id
+        self.name = name
+        self.detail = detail
+        self.steps = steps
     }
 
-    var totalSeconds: TimeInterval { steps.reduce(0) { $0 + $1.seconds } }
+    public struct ProgramStep: Hashable {
+        public let preset: BrainwavePreset
+        public let seconds: TimeInterval
+
+        public init(preset: BrainwavePreset, seconds: TimeInterval) {
+            self.preset = preset
+            self.seconds = seconds
+        }
+    }
+
+    public var totalSeconds: TimeInterval { steps.reduce(0) { $0 + $1.seconds } }
 
     /// "Alpha→Beta".
-    var bandSummary: String { steps.map(\.preset.band).joined(separator: "→") }
+    public var bandSummary: String { steps.map(\.preset.band).joined(separator: "→") }
 
     /// Index of the step playing `elapsed` seconds into the program (the last
     /// step once the schedule is over; negative time counts as the start).
-    func stepIndex(at elapsed: TimeInterval) -> Int {
+    public func stepIndex(at elapsed: TimeInterval) -> Int {
         var end: TimeInterval = 0
         for (index, step) in steps.enumerated() {
             end += step.seconds
@@ -133,7 +145,7 @@ struct FocusProgram: Identifiable, Hashable {
         return max(0, steps.count - 1)
     }
 
-    static let all: [FocusProgram] = [
+    public static let all: [FocusProgram] = [
         FocusProgram(
             id: "study",
             name: "Study Flow",
@@ -170,21 +182,21 @@ struct FocusProgram: Identifiable, Hashable {
     }
 }
 
-enum TimeFormat {
+public enum TimeFormat {
     /// Countdown text: "05:00", "90:00" (minutes keep counting past 59).
-    static func clock(_ seconds: Int) -> String {
+    public static func clock(_ seconds: Int) -> String {
         let seconds = max(0, seconds)
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }
 
-enum ToneStyle: String, CaseIterable, Identifiable {
+public enum ToneStyle: String, CaseIterable, Identifiable {
     case binaural = "Binaural"
     case isochronic = "Isochronic"
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var tip: String {
+    public var tip: String {
         switch self {
         case .binaural:
             return "Two tones, one per ear · headphones recommended"

@@ -1,5 +1,5 @@
+@testable import NeuraWaveCore
 import XCTest
-@testable import NeuraWave
 
 final class OscillatorTests: XCTestCase {
     /// The phasor oscillator must track sin(2πft) closely over a long

@@ -1,5 +1,5 @@
+@testable import NeuraWaveCore
 import XCTest
-@testable import NeuraWave
 
 final class GainFaderTests: XCTestCase {
     private let rate = 48_000.0

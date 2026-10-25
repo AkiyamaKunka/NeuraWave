@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import NeuraWaveCore
 
 /// Command-line options for the hidden self-test mode (`--autotest`).
 /// Every flag takes `--name value` or `--name=value`.
@@ -76,7 +77,7 @@ struct CommandLineArguments {
 /// a line per event. The run ends with `AUTOTEST_COMPLETE` and a
 /// `SWITCH_CHECK` line, then exits the process.
 @MainActor
-final class AutoTestRunner {
+final class AutoTestRunner: SessionSelfTest {
     private struct Config {
         let preset: BrainwavePreset
         let style: ToneStyle
@@ -146,6 +147,8 @@ final class AutoTestRunner {
     }
 
     // MARK: Hooks called by SessionController
+
+    var publishesNowPlaying: Bool { options.publishesNowPlaying }
 
     func programStepped(to index: Int, of count: Int, preset: BrainwavePreset) {
         log("PROGRAM_STEP \(index + 1)/\(count) \(preset.name) -> \(snapshot())")

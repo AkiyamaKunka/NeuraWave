@@ -1,6 +1,6 @@
 import AVFoundation
+@testable import NeuraWaveCore
 import XCTest
-@testable import NeuraWave
 
 /// Rough CPU cost of the realtime render: renders 20 s of audio per
 /// configuration and reports the real-time factor (lower is better). Fails

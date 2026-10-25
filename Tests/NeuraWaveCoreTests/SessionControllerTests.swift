@@ -1,5 +1,6 @@
+@testable import NeuraWaveCore
+import NeuraWaveTestSupport
 import XCTest
-@testable import NeuraWave
 
 @MainActor
 final class SessionControllerTests: XCTestCase {

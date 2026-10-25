@@ -11,7 +11,7 @@ import os
 ///   generator and counters; the main thread only reads diagnostics.
 /// The render callback therefore never writes back a field another thread may
 /// have changed while it was rendering.
-final class RealtimeState: @unchecked Sendable {
+public final class RealtimeState: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock()
     // Main-thread owned.
     private var pendingTone: ToneConfig?
@@ -36,7 +36,7 @@ final class RealtimeState: @unchecked Sendable {
     /// output is silent: if audio is audible it first dips to silence, swaps
     /// parameters (phases reset while inaudible), and ramps back up — no node
     /// rebuild, no click.
-    func configure(preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool) {
+    public func configure(preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool) {
         lock.withLock {
             if pendingTone != nil {
                 coalescedCount += 1
@@ -48,11 +48,11 @@ final class RealtimeState: @unchecked Sendable {
         }
     }
 
-    func setRunning(_ value: Bool) {
+    public func setRunning(_ value: Bool) {
         lock.withLock { running = value }
     }
 
-    func update(volume: Float, noiseEnabled: Bool) {
+    public func update(volume: Float, noiseEnabled: Bool) {
         lock.withLock {
             self.volume = volume
             self.noiseEnabled = noiseEnabled
@@ -63,11 +63,11 @@ final class RealtimeState: @unchecked Sendable {
     /// rebuilt node fades in from silence instead of starting at full level.
     /// This is the one main-thread write to render-owned state; calling it
     /// while a node is attached would race with render().
-    func resetGain() {
+    public func resetGain() {
         lock.withLock { fader = GainFader() }
     }
 
-    func render(
+    public func render(
         buffers: UnsafeMutableAudioBufferListPointer,
         frameCount: Int,
         sampleRate: Double
@@ -157,11 +157,11 @@ final class RealtimeState: @unchecked Sendable {
 
     /// Configuration requests made so far (autotest compares this with the
     /// number of switches the render thread actually applied).
-    func requests() -> (requested: UInt64, coalesced: UInt64) {
+    public func requests() -> (requested: UInt64, coalesced: UInt64) {
         lock.withLock { (requestCount, coalescedCount) }
     }
 
-    func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
+    public func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
         lock.lock()
         defer { lock.unlock() }
         return (framesRendered, nanCount, clipCount, switchCount, fader.gain)
@@ -169,22 +169,22 @@ final class RealtimeState: @unchecked Sendable {
 }
 
 /// The tone being played.
-struct ToneConfig {
-    var carrier: Double
-    var beat: Double
-    var style: ToneStyle
+public struct ToneConfig {
+    public var carrier: Double
+    public var beat: Double
+    public var style: ToneStyle
 
     /// Right-ear frequency: offset by the beat for binaural, same as the
     /// left for isochronic (which pulses instead).
-    var rightFrequency: Double {
+    public var rightFrequency: Double {
         carrier + (style == .binaural ? beat : 0)
     }
 }
 
 /// What is sounding: the tone and its three oscillators (left carrier, right
 /// carrier, isochronic pulse envelope). Produces the unscaled stereo tone.
-struct Voice {
-    private(set) var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
+public struct Voice {
+    public private(set) var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
     private var left = SineOscillator()
     private var right = SineOscillator()
     private var envelope = SineOscillator()
@@ -193,7 +193,7 @@ struct Voice {
 
     /// Make sure the per-sample rotations match `sampleRate` (cheap no-op
     /// unless the device rate or tone changed).
-    mutating func prepare(sampleRate: Double) {
+    public mutating func prepare(sampleRate: Double) {
         guard rotations == nil || preparedSampleRate != sampleRate else { return }
         preparedSampleRate = sampleRate
         rotations = (
@@ -204,7 +204,7 @@ struct Voice {
     }
 
     /// Switch tone, restarting every oscillator at phase 0. Call while silent.
-    mutating func retune(to tone: ToneConfig, sampleRate: Double) {
+    public mutating func retune(to tone: ToneConfig, sampleRate: Double) {
         self.tone = tone
         rotations = nil
         prepare(sampleRate: sampleRate)
@@ -215,7 +215,7 @@ struct Voice {
 
     /// Next stereo tone sample in [-1, 1] (before volume and fades).
     @inline(__always)
-    mutating func next() -> (left: Float, right: Float) {
+    public mutating func next() -> (left: Float, right: Float) {
         guard let rotations else { return (0, 0) }
         let pulse = envelope.next(rotations.envelope)
         // Isochronic: the tone pulses between 45% and 100% at the beat rate.
@@ -224,7 +224,7 @@ struct Voice {
     }
 
     /// Keep the oscillators exact (call once per buffer).
-    mutating func renormalize() {
+    public mutating func renormalize() {
         left.renormalize()
         right.renormalize()
         envelope.renormalize()
@@ -237,29 +237,29 @@ struct Voice {
 /// - A live switch dips to silence quickly (60 ms), the tone is swapped while
 ///   silent, then it comes back quickly (150 ms).
 /// - A tone applied from silence (session start) keeps the slow fade-in.
-struct GainFader {
-    struct Rates {
-        let slowStep: Float
-        let dipStep: Float
-        let recoverStep: Float
+public struct GainFader {
+    public struct Rates {
+        public let slowStep: Float
+        public let dipStep: Float
+        public let recoverStep: Float
 
-        init(sampleRate: Double) {
+        public init(sampleRate: Double) {
             slowStep = 1 / max(Float(sampleRate * 2.0), 1)
             dipStep = 1 / max(Float(sampleRate * 0.06), 1)
             recoverStep = 1 / max(Float(sampleRate * 0.15), 1)
         }
     }
 
-    private(set) var gain: Float = 0
+    public private(set) var gain: Float = 0
     /// Ramp up quickly: the last switch was a dip from audible.
     private var quickRecovery = false
     /// Currently dipping for a live switch (gain was audible when it began).
     private var dipping = false
 
-    var isSilent: Bool { gain <= 0.001 }
+    public var isSilent: Bool { gain <= 0.001 }
 
     /// The pending tone was applied while silent.
-    mutating func didSwitch() {
+    public mutating func didSwitch() {
         quickRecovery = dipping
         dipping = false
     }
@@ -267,7 +267,7 @@ struct GainFader {
     /// Advance one sample toward silence (stopped/paused, or dipping for a
     /// switch) or full level; returns the new gain.
     @inline(__always)
-    mutating func advance(running: Bool, switching: Bool, rates: Rates) -> Float {
+    public mutating func advance(running: Bool, switching: Bool, rates: Rates) -> Float {
         var target: Float = running ? 1 : 0
         if switching && !isSilent {
             target = 0
@@ -288,32 +288,32 @@ struct GainFader {
 
 /// Volume and noise levels that glide (~25 ms one-pole) toward their
 /// targets, so dragging the slider or toggling noise never steps or clicks.
-struct LevelSmoother {
-    private(set) var volume: Float
-    private(set) var noise: Float
+public struct LevelSmoother {
+    public private(set) var volume: Float
+    public private(set) var noise: Float
 
-    init(volume: Float, noise: Float) {
+    public init(volume: Float, noise: Float) {
         self.volume = volume
         self.noise = noise
     }
 
-    static func coefficient(sampleRate: Double) -> Float {
+    public static func coefficient(sampleRate: Double) -> Float {
         Float(1 - exp(-1 / (sampleRate * 0.025)))
     }
 
     @inline(__always)
-    mutating func advance(volume target: Float, noise noiseTarget: Float, coefficient: Float) {
+    public mutating func advance(volume target: Float, noise noiseTarget: Float, coefficient: Float) {
         volume += (target - volume) * coefficient
         noise += (noiseTarget - noise) * coefficient
     }
 }
 
 /// Phase advance per sample for one frequency, as a rotation.
-struct Rotation {
-    let cos: Double
-    let sin: Double
+public struct Rotation {
+    public let cos: Double
+    public let sin: Double
 
-    init(frequency: Double, sampleRate: Double) {
+    public init(frequency: Double, sampleRate: Double) {
         let step = 2 * Double.pi * frequency / sampleRate
         cos = Foundation.cos(step)
         sin = Foundation.sin(step)
@@ -323,18 +323,18 @@ struct Rotation {
 /// Sine generator that rotates a unit phasor: one complex multiply per
 /// sample instead of a sin() call, phase-continuous across buffers. Starts
 /// at phase 0 (value 0) like a freshly reset phase accumulator.
-struct SineOscillator {
+public struct SineOscillator {
     private var s: Double = 0 // sin(phase)
     private var c: Double = 1 // cos(phase)
 
-    mutating func reset() {
+    public mutating func reset() {
         s = 0
         c = 1
     }
 
     /// The current sample, then advance one step.
     @inline(__always)
-    mutating func next(_ rotation: Rotation) -> Double {
+    public mutating func next(_ rotation: Rotation) -> Double {
         let value = s
         let nextS = s * rotation.cos + c * rotation.sin
         c = c * rotation.cos - s * rotation.sin
@@ -343,7 +343,7 @@ struct SineOscillator {
     }
 
     /// Pull the phasor back onto the unit circle (call once per buffer).
-    mutating func renormalize() {
+    public mutating func renormalize() {
         let magnitude = (s * s + c * c).squareRoot()
         guard magnitude > 0 else {
             reset()
@@ -358,14 +358,14 @@ struct SineOscillator {
 /// replaced per sample (a cheap low-pass "Voss" style generator), driven by
 /// an xorshift PRNG. A plain value type: no allocation, no locks, no system
 /// calls, so it is safe on the realtime audio thread.
-struct NoiseGenerator {
+public struct NoiseGenerator {
     private var rows = SIMD16<Float>(repeating: 0)
     private var sum: Float = 0
     private var state: UInt32 = 0x9E37_79B9
 
     /// Next sample in roughly [-1, 1] (mostly far smaller, being an average).
     @inline(__always)
-    mutating func next() -> Float {
+    public mutating func next() -> Float {
         state ^= state << 13
         state ^= state >> 17
         state ^= state << 5
@@ -378,7 +378,7 @@ struct NoiseGenerator {
 
     /// Recompute the running sum exactly (call once per buffer) so float
     /// rounding can't build up a DC offset over hours of playback.
-    mutating func resync() {
+    public mutating func resync() {
         sum = rows.sum()
     }
 }
