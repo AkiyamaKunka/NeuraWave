@@ -35,4 +35,7 @@ jobs:
       - name: Core unit tests on an iOS simulator
         run: |
           DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r,l in sorted(d.items(), reverse=True) if "iOS" in r for x in l if x["name"].startswith("iPhone")))')
-          xcodebuild test -scheme NeuraWaveCoreTests -destination "id=$DEVICE_ID" -quiet
+          set -o pipefail
+          xcodebuild test -scheme NeuraWaveCoreTests -destination "id=$DEVICE_ID" | tee ios-tests.log | grep -E "Test Case|Executed|error:"
+          # A scheme that silently matched no tests would also "succeed".
+          grep -qE "Executed [1-9][0-9]* tests?, with 0 failures" ios-tests.log
