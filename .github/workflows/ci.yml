@@ -30,7 +30,9 @@ jobs:
       - name: Build NeuraWaveCore for iOS
         run: xcodebuild -scheme NeuraWaveCore -destination 'generic/platform=iOS Simulator' build -quiet
 
+      # The package-wide scheme would also build the macOS app, so a shared
+      # scheme (.swiftpm/xcode) runs just the core tests.
       - name: Core unit tests on an iOS simulator
         run: |
           DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r,l in sorted(d.items(), reverse=True) if "iOS" in r for x in l if x["name"].startswith("iPhone")))')
-          xcodebuild test -scheme NeuraWave-Package -destination "id=$DEVICE_ID" -only-testing:NeuraWaveCoreTests -quiet
+          xcodebuild test -scheme NeuraWaveCoreTests -destination "id=$DEVICE_ID" -quiet
