@@ -90,17 +90,24 @@ What changed between versions is in [CHANGELOG.md](CHANGELOG.md).
 How the pieces fit together (threads, the audio handoff, fades) is in
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
+The code is split in two. `Sources/NeuraWaveCore` is a library with no AppKit
+in it (sound, session logic, presets, settings), built for macOS and iOS so a
+future iPhone app can share it. `Sources/NeuraWave` is the macOS app on top.
+
 | File | What lives there |
 | --- | --- |
+| **NeuraWaveCore** | |
 | `Models.swift` | Presets, focus programs, tone styles, volume range, time formatting |
 | `SettingsStore.swift` | Everything remembered between launches (typed, with safe fallbacks) |
 | `SessionController.swift` | The one playback session: start/stop, pause/resume, timers, programs, Now Playing |
 | `SessionClock.swift` | Pause-aware elapsed/remaining time (pure, unit tested) |
-| `SessionDependencies.swift` | `AudioOutput` / `NowPlayingPublishing` protocols, so the session is testable without audio |
+| `SessionDependencies.swift` | `AudioOutput` / `NowPlayingPublishing` / `SessionSelfTest` protocols, so the session is testable without audio |
 | `AudioEngine.swift` | AVAudioEngine lifecycle: output chain, pause release, device-change rebuilds |
 | `RealtimeRenderer.swift` | The audio-thread renderer: lock-safe state handoff, phasor oscillators, fades, noise |
+| `NowPlayingController.swift` | AirPods / Control Center commands and Now Playing info |
+| **NeuraWave (macOS app)** | |
 | `ContentView.swift`, `WindowSections.swift`, `WaveformView.swift` | The window |
-| `MenuBarController.swift`, `NowPlayingController.swift` | Menu bar item; AirPods / Control Center commands |
+| `MenuBarController.swift` | Menu bar item |
 | `LoginItem.swift`, `MainWindow.swift` | Launch at Login; showing, hiding and reopening the main window |
 | `AutoTest.swift`, `DeveloperTools.swift` | Hidden self-test mode, `--screenshot`, window probe |
 

@@ -1,4 +1,5 @@
 import AppKit
+import NeuraWaveCore
 import SwiftUI
 
 /// Command-line helpers for docs and self-tests (not used in normal runs).

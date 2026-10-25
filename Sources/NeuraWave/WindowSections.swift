@@ -1,3 +1,4 @@
+import NeuraWaveCore
 import SwiftUI
 
 // The main window's building blocks. Each takes plain values and callbacks,

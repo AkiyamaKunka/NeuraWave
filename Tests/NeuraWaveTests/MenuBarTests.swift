@@ -1,6 +1,8 @@
 import AppKit
-import XCTest
 @testable import NeuraWave
+import NeuraWaveCore
+import NeuraWaveTestSupport
+import XCTest
 
 @MainActor
 final class MenuBarTests: XCTestCase {

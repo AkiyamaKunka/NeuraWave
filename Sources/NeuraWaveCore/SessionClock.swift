@@ -5,42 +5,42 @@ import Foundation
 /// long is left. Paused time never counts, so a paused session can't expire
 /// underneath you. A pure value type: every query takes `now`, which keeps
 /// it deterministic in tests.
-struct SessionClock: Equatable {
+public struct SessionClock: Equatable, Sendable {
     private let startedAt: Date
     private var pausedTotal: TimeInterval = 0
     private var pausedAt: Date?
     /// Total playing time the session lasts; nil = open-ended.
-    private(set) var duration: TimeInterval?
+    public private(set) var duration: TimeInterval?
 
-    init(startedAt: Date, duration: TimeInterval?) {
+    public init(startedAt: Date, duration: TimeInterval?) {
         self.startedAt = startedAt
         self.duration = duration
     }
 
-    var isPaused: Bool { pausedAt != nil }
+    public var isPaused: Bool { pausedAt != nil }
 
     /// Time actually played: wall time since start minus every pause,
     /// including one in progress.
-    func elapsed(at now: Date) -> TimeInterval {
+    public func elapsed(at now: Date) -> TimeInterval {
         let currentPause = pausedAt.map { now.timeIntervalSince($0) } ?? 0
         return max(0, now.timeIntervalSince(startedAt) - pausedTotal - currentPause)
     }
 
     /// Playing time left before the session ends; nil when open-ended.
-    func remaining(at now: Date) -> TimeInterval? {
+    public func remaining(at now: Date) -> TimeInterval? {
         duration.map { max(0, $0 - elapsed(at: now)) }
     }
 
-    func isFinished(at now: Date) -> Bool {
+    public func isFinished(at now: Date) -> Bool {
         remaining(at: now).map { $0 <= 0 } ?? false
     }
 
-    mutating func pause(at now: Date) {
+    public mutating func pause(at now: Date) {
         guard pausedAt == nil else { return }
         pausedAt = now
     }
 
-    mutating func resume(at now: Date) {
+    public mutating func resume(at now: Date) {
         guard let pausedAt else { return }
         pausedTotal += max(0, now.timeIntervalSince(pausedAt))
         self.pausedAt = nil
@@ -49,7 +49,7 @@ struct SessionClock: Equatable {
     /// Restart the countdown: `seconds` more playing time from `now` (nil =
     /// no end). Time already played is kept for progress displays, so Now
     /// Playing shows e.g. 20:00 of 50:00 after picking 30 min twenty minutes in.
-    mutating func setRemaining(_ seconds: TimeInterval?, at now: Date) {
+    public mutating func setRemaining(_ seconds: TimeInterval?, at now: Date) {
         duration = seconds.map { elapsed(at: now) + $0 }
     }
 }

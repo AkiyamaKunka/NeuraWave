@@ -1,5 +1,5 @@
-import XCTest
 @testable import NeuraWave
+import XCTest
 
 final class AutoTestOptionsTests: XCTestCase {
     func testAbsentWithoutTheFlag() {

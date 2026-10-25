@@ -6,27 +6,27 @@ import SwiftUI
 /// Control Center: what is playing, timers and focus programs, pause/resume,
 /// and the Now Playing metadata. Sound itself is produced by `AudioEngine`.
 @MainActor
-final class SessionController: ObservableObject {
+public final class SessionController: ObservableObject {
     /// One app-wide instance shared by the window and the menu bar item.
-    static let shared = SessionController()
+    public static let shared = SessionController()
 
-    @Published private(set) var isPlaying = false
-    @Published private(set) var isPaused = false
-    @Published private(set) var remainingSeconds: Int?
-    @Published private(set) var lastError: String?
-    @Published private(set) var programTitle: String?
-    @Published private(set) var programStep: (index: Int, count: Int)?
-    @Published private(set) var isRunningProgram = false
-    @Published private(set) var currentPreset: BrainwavePreset = BrainwavePreset.byId(SettingsStore.defaultPresetID)
+    @Published public private(set) var isPlaying = false
+    @Published public private(set) var isPaused = false
+    @Published public private(set) var remainingSeconds: Int?
+    @Published public private(set) var lastError: String?
+    @Published public private(set) var programTitle: String?
+    @Published public private(set) var programStep: (index: Int, count: Int)?
+    @Published public private(set) var isRunningProgram = false
+    @Published public private(set) var currentPreset: BrainwavePreset = BrainwavePreset.byId(SettingsStore.defaultPresetID)
     /// What the session is called right now (preset, or "Program · Step").
-    @Published private(set) var sessionTitle = "NeuraWave"
+    @Published public private(set) var sessionTitle = "NeuraWave"
 
-    let audio: AudioOutput
+    public let audio: AudioOutput
     /// The real engine when running for real (self-tests and diagnostics).
-    var engine: AudioEngine? { audio as? AudioEngine }
-    var settings: SettingsStore
-    /// Set while the hidden self-test drives this session (see AutoTest.swift).
-    weak var selfTest: AutoTestRunner?
+    public var engine: AudioEngine? { audio as? AudioEngine }
+    public var settings: SettingsStore
+    /// Set while the Mac app's hidden self-test drives this session.
+    public weak var selfTest: SessionSelfTest?
 
     /// The sound being played (program steps change `preset` as they go).
     private struct PlaybackConfig {
@@ -47,7 +47,7 @@ final class SessionController: ObservableObject {
 
     private static let audioFailureMessage = "Could not start audio. Check that an output device is connected and System Settings allows audio output."
 
-    init(
+    public init(
         audio: AudioOutput? = nil,
         nowPlaying: NowPlayingPublishing? = nil,
         settings: SettingsStore = .standard,
@@ -73,7 +73,7 @@ final class SessionController: ObservableObject {
     // MARK: - Starting
 
     /// Plays one preset, optionally with a sleep timer.
-    func start(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?) {
+    public func start(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool, minutes: Int?) {
         let config = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
         guard begin(config, duration: minutes.map { Double($0) * 60 }) else { return }
         currentPreset = preset
@@ -84,7 +84,7 @@ final class SessionController: ObservableObject {
 
     /// Runs a timed program: presets auto-advance through the click-free
     /// crossfade, and the session stops itself when the schedule ends.
-    func startProgram(_ program: FocusProgram, style: ToneStyle, volume: Double, withNoise: Bool) {
+    public func startProgram(_ program: FocusProgram, style: ToneStyle, volume: Double, withNoise: Bool) {
         let first = program.steps[0].preset
         let config = PlaybackConfig(preset: first, style: style, volume: volume, noise: withNoise)
         guard begin(config, duration: program.totalSeconds) else { return }
@@ -124,7 +124,7 @@ final class SessionController: ObservableObject {
     /// volume, noise, timer), all of which the window saves as you change
     /// them. Replaying an in-memory "last config" instead mixed stale and
     /// fresh settings (e.g. an old style or timer).
-    func startLast() {
+    public func startLast() {
         if let program = settings.program {
             startProgram(program, style: settings.style, volume: settings.volume, withNoise: settings.noise)
         } else {
@@ -139,7 +139,7 @@ final class SessionController: ObservableObject {
 
     /// Menu bar "Presets" submenu: switch the playing preset in place, or
     /// start it fresh with the window's saved style, volume and timer.
-    func playPreset(_ preset: BrainwavePreset) {
+    public func playPreset(_ preset: BrainwavePreset) {
         if isPlaying, program == nil, let playback {
             if isPaused {
                 resumePlayback()
@@ -160,7 +160,7 @@ final class SessionController: ObservableObject {
 
     // MARK: - Live changes
 
-    func switchPreset(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool) {
+    public func switchPreset(preset: BrainwavePreset, style: ToneStyle, volume: Double, withNoise: Bool) {
         guard isPlaying else { return }
         playback = PlaybackConfig(preset: preset, style: style, volume: volume, noise: withNoise)
         // Already at the eased-out level during the final fade, so no buffer
@@ -178,7 +178,7 @@ final class SessionController: ObservableObject {
     /// Timer picked or changed while a single-preset session plays: apply it
     /// now (counted from this moment) instead of silently waiting for the
     /// next Start. Programs have their own schedule and ignore this.
-    func updateTimer(minutes: Int?) {
+    public func updateTimer(minutes: Int?) {
         guard isPlaying, program == nil, var clock else { return }
         let now = self.now()
         clock.setRemaining(minutes.map { Double($0) * 60 }, at: now)
@@ -191,7 +191,7 @@ final class SessionController: ObservableObject {
 
     /// Immediate volume/noise change (no crossfade needed). Also fine while
     /// stopped: the engine keeps the level for the next start.
-    func updateLive(volume: Double, noiseEnabled: Bool) {
+    public func updateLive(volume: Double, noiseEnabled: Bool) {
         playback?.volume = volume
         playback?.noise = noiseEnabled
         if isEndingFadeApplied, let clock {
@@ -204,7 +204,7 @@ final class SessionController: ObservableObject {
 
     // MARK: - Stopping
 
-    func stop() {
+    public func stop() {
         ticker?.invalidate()
         ticker = nil
         audio.stop()
@@ -223,7 +223,7 @@ final class SessionController: ObservableObject {
         }
     }
 
-    func clearError() {
+    public func clearError() {
         lastError = nil
     }
 
@@ -248,7 +248,7 @@ final class SessionController: ObservableObject {
     }
 
     /// Advance timers/programs (driven by the ticker; tests call it directly).
-    func tick() {
+    public func tick() {
         guard isPlaying, !isPaused, let clock else { return }
         let now = self.now()
         if clock.isFinished(at: now) {
@@ -265,13 +265,13 @@ final class SessionController: ObservableObject {
     /// Sleep timers and programs don't end abruptly: over the last 30 s the
     /// volume eases down to silence (then the regular stop fade follows), so
     /// the end of a Deep Sleep timer doesn't wake you.
-    nonisolated static let endingFadeSeconds: TimeInterval = 30
+    public nonisolated static let endingFadeSeconds: TimeInterval = 30
 
     /// Level multiplier with `remaining` seconds left: falls evenly in
     /// decibels from 1 (0 dB) to 0.01 (−40 dB) over the fade, so each tick's
     /// step is the same small ~0.7 dB instead of big jumps near the end; the
     /// regular stop fade takes it from −40 dB to silence.
-    nonisolated static func endingFadeFactor(remaining: TimeInterval) -> Double {
+    public nonisolated static func endingFadeFactor(remaining: TimeInterval) -> Double {
         let progress = 1 - min(max(remaining / endingFadeSeconds, 0), 1)
         return pow(10, -2 * progress)
     }
@@ -329,7 +329,7 @@ final class SessionController: ObservableObject {
 
     // MARK: - Playback control (AirPods / Now Playing / menu bar)
 
-    func pausePlayback() {
+    public func pausePlayback() {
         guard isPlaying, !isPaused else { return }
         isPaused = true
         clock?.pause(at: now())
@@ -337,7 +337,7 @@ final class SessionController: ObservableObject {
         pushNowPlaying()
     }
 
-    func resumePlayback() {
+    public func resumePlayback() {
         guard isPlaying, isPaused else { return }
         isPaused = false
         clock?.resume(at: now())
@@ -354,7 +354,7 @@ final class SessionController: ObservableObject {
         }
     }
 
-    func resumeOrStart() {
+    public func resumeOrStart() {
         if isPlaying {
             resumePlayback()
         } else {
@@ -362,7 +362,7 @@ final class SessionController: ObservableObject {
         }
     }
 
-    func togglePlayPause() {
+    public func togglePlayPause() {
         if !isPlaying {
             startLast()
         } else if isPaused {
@@ -373,11 +373,11 @@ final class SessionController: ObservableObject {
     }
 
     /// AirPods double-press: step through presets while a session is active.
-    func nextPreset() {
+    public func nextPreset() {
         stepPreset(by: 1)
     }
 
-    func previousPreset() {
+    public func previousPreset() {
         stepPreset(by: -1)
     }
 
@@ -397,7 +397,7 @@ final class SessionController: ObservableObject {
     /// it over from whatever you're listening to) unless asked to cover it
     /// with --autotest-now-playing.
     private var publishesNowPlaying: Bool {
-        selfTest?.options.publishesNowPlaying ?? true
+        selfTest?.publishesNowPlaying ?? true
     }
 
     /// Publishes title, elapsed time, duration and rate. Called on state
@@ -421,7 +421,7 @@ final class SessionController: ObservableObject {
     /// to another app) arrive asynchronously from outside. During a self-test
     /// they would make results depend on whatever else the Mac is doing, so
     /// they are logged and ignored.
-    func shouldHandleRemoteCommand(_ name: String) -> Bool {
+    public func shouldHandleRemoteCommand(_ name: String) -> Bool {
         guard let selfTest else { return true }
         selfTest.remoteCommandIgnored(name)
         return false
