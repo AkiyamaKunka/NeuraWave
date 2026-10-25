@@ -1,6 +1,6 @@
 import SwiftUI
 
-public struct BrainwavePreset: Identifiable, Hashable {
+public struct BrainwavePreset: Identifiable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let band: String
@@ -104,7 +104,7 @@ public enum VolumeLevel {
 /// Step design follows the evidence in RESEARCH.md: settle-in phases before
 /// demanding work (Garcia-Argibay 2019), alpha gating (Klimesch 2012),
 /// gamma via isochronic-favoring steps (ASSR literature), theta only in rest.
-public struct FocusProgram: Identifiable, Hashable {
+public struct FocusProgram: Identifiable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let detail: String
@@ -117,7 +117,7 @@ public struct FocusProgram: Identifiable, Hashable {
         self.steps = steps
     }
 
-    public struct ProgramStep: Hashable {
+    public struct ProgramStep: Hashable, Sendable {
         public let preset: BrainwavePreset
         public let seconds: TimeInterval
 
@@ -190,7 +190,7 @@ public enum TimeFormat {
     }
 }
 
-public enum ToneStyle: String, CaseIterable, Identifiable {
+public enum ToneStyle: String, CaseIterable, Identifiable, Sendable {
     case binaural = "Binaural"
     case isochronic = "Isochronic"
 

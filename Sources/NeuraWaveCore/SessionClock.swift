@@ -5,7 +5,7 @@ import Foundation
 /// long is left. Paused time never counts, so a paused session can't expire
 /// underneath you. A pure value type: every query takes `now`, which keeps
 /// it deterministic in tests.
-public struct SessionClock: Equatable {
+public struct SessionClock: Equatable, Sendable {
     private let startedAt: Date
     private var pausedTotal: TimeInterval = 0
     private var pausedAt: Date?

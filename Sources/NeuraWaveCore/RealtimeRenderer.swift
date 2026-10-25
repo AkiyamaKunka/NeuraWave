@@ -169,7 +169,7 @@ public final class RealtimeState: @unchecked Sendable {
 }
 
 /// The tone being played.
-public struct ToneConfig {
+public struct ToneConfig: Sendable {
     public var carrier: Double
     public var beat: Double
     public var style: ToneStyle
@@ -183,7 +183,7 @@ public struct ToneConfig {
 
 /// What is sounding: the tone and its three oscillators (left carrier, right
 /// carrier, isochronic pulse envelope). Produces the unscaled stereo tone.
-public struct Voice {
+public struct Voice: Sendable {
     public private(set) var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
     private var left = SineOscillator()
     private var right = SineOscillator()
@@ -237,8 +237,8 @@ public struct Voice {
 /// - A live switch dips to silence quickly (60 ms), the tone is swapped while
 ///   silent, then it comes back quickly (150 ms).
 /// - A tone applied from silence (session start) keeps the slow fade-in.
-public struct GainFader {
-    public struct Rates {
+public struct GainFader: Sendable {
+    public struct Rates: Sendable {
         public let slowStep: Float
         public let dipStep: Float
         public let recoverStep: Float
@@ -288,7 +288,7 @@ public struct GainFader {
 
 /// Volume and noise levels that glide (~25 ms one-pole) toward their
 /// targets, so dragging the slider or toggling noise never steps or clicks.
-public struct LevelSmoother {
+public struct LevelSmoother: Sendable {
     public private(set) var volume: Float
     public private(set) var noise: Float
 
@@ -309,7 +309,7 @@ public struct LevelSmoother {
 }
 
 /// Phase advance per sample for one frequency, as a rotation.
-public struct Rotation {
+public struct Rotation: Sendable {
     public let cos: Double
     public let sin: Double
 
@@ -323,7 +323,7 @@ public struct Rotation {
 /// Sine generator that rotates a unit phasor: one complex multiply per
 /// sample instead of a sin() call, phase-continuous across buffers. Starts
 /// at phase 0 (value 0) like a freshly reset phase accumulator.
-public struct SineOscillator {
+public struct SineOscillator: Sendable {
     private var s: Double = 0 // sin(phase)
     private var c: Double = 1 // cos(phase)
 
@@ -358,7 +358,7 @@ public struct SineOscillator {
 /// replaced per sample (a cheap low-pass "Voss" style generator), driven by
 /// an xorshift PRNG. A plain value type: no allocation, no locks, no system
 /// calls, so it is safe on the realtime audio thread.
-public struct NoiseGenerator {
+public struct NoiseGenerator: Sendable {
     private var rows = SIMD16<Float>(repeating: 0)
     private var sum: Float = 0
     private var state: UInt32 = 0x9E37_79B9
