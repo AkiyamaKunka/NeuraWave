@@ -21,3 +21,16 @@ jobs:
 
       - name: Self-test scenarios (parallel; smoke, stop/restart, stress, pause/resume, device change, program, timer)
         run: swift build && bash scripts/quick-tests.sh
+
+  ios-core:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build NeuraWaveCore for iOS
+        run: xcodebuild -scheme NeuraWaveCore -destination 'generic/platform=iOS Simulator' build -quiet
+
+      - name: Core unit tests on an iOS simulator
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r,l in sorted(d.items(), reverse=True) if "iOS" in r for x in l if x["name"].startswith("iPhone")))')
+          xcodebuild test -scheme NeuraWave-Package -destination "id=$DEVICE_ID" -only-testing:NeuraWaveCoreTests -quiet
