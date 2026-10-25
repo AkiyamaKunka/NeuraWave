@@ -24,6 +24,11 @@ public struct SettingsStore {
 
     public let defaults: UserDefaults
 
+    /// `.standard` for the app; a suite for tests (or an App Group later).
+    public init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
     public var preset: BrainwavePreset {
         get {
             let id = defaults.string(forKey: Key.preset)
