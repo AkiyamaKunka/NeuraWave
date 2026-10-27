@@ -1,7 +1,8 @@
 # Xcode project for the iPhone app, generated with XcodeGen:
 #   brew install xcodegen && cd Apps/iOS && xcodegen
-# The generated NeuraWave.xcodeproj is not committed.
-name: NeuraWave
+# The generated NeuraWaveiOS.xcodeproj is not committed. The target isn't
+# called NeuraWave so Xcode doesn't mix it up with the package's macOS app.
+name: NeuraWaveiOS
 options:
   bundleIdPrefix: com.akiyamakunka
   deploymentTarget:
@@ -19,7 +20,7 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
 targets:
-  NeuraWave:
+  NeuraWaveiOS:
     type: application
     platform: iOS
     sources:

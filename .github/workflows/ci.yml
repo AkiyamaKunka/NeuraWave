@@ -52,5 +52,5 @@ jobs:
       - name: Build the iPhone app
         run: |
           cd Apps/iOS
-          xcodebuild -project NeuraWave.xcodeproj -scheme NeuraWave -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO -quiet
-          xcodebuild -project NeuraWave.xcodeproj -scheme NeuraWave -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO -quiet
+          xcodebuild -project NeuraWaveiOS.xcodeproj -scheme NeuraWaveiOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO -quiet
+          xcodebuild -project NeuraWaveiOS.xcodeproj -scheme NeuraWaveiOS -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO -quiet
