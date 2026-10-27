@@ -9,3 +9,5 @@ NeuraWave-*.zip
 /screenshot-user.png
 *.log
 .build-strict/
+
+Apps/iOS/NeuraWaveiOS.xcodeproj/

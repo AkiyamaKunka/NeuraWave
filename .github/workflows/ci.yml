@@ -39,3 +39,18 @@ jobs:
           xcodebuild test -scheme NeuraWaveCoreTests -destination "id=$DEVICE_ID" | tee ios-tests.log | grep -E "Test Case|Executed|error:"
           # A scheme that silently matched no tests would also "succeed".
           grep -qE "Executed [1-9][0-9]* tests?, with 0 failures" ios-tests.log
+
+  ios-app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate the Xcode project
+        run: brew install xcodegen && cd Apps/iOS && xcodegen
+
+      # Unsigned: proves the app compiles for simulator and device.
+      - name: Build the iPhone app
+        run: |
+          cd Apps/iOS
+          xcodebuild -project NeuraWaveiOS.xcodeproj -scheme NeuraWaveiOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO -quiet
+          xcodebuild -project NeuraWaveiOS.xcodeproj -scheme NeuraWaveiOS -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO -quiet
