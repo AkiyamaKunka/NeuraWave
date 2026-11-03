@@ -1,0 +1,17 @@
+{
+  "bundleId": "com.akiyamakunka.NeuraWave",
+  "locale": "en-US",
+  "name": "NeuraWave",
+  "subtitle": "Brainwave tones for focus",
+  "primaryCategory": "HEALTH_AND_FITNESS",
+  "secondaryCategory": "PRODUCTIVITY",
+  "copyright": "2026 Junjia",
+  "supportUrl": "https://github.com/AkiyamaKunka/NeuraWave/issues",
+  "marketingUrl": "https://github.com/AkiyamaKunka/NeuraWave",
+  "privacyPolicyUrl": "https://github.com/AkiyamaKunka/NeuraWave/blob/feature/ios-app/PRIVACY.md",
+  "promotionalText": "Binaural and isochronic tones tuned to the rates studied in focus and relaxation research, with focus programs that plan your session. No account, no ads, no tracking.",
+  "keywords": "binaural,isochronic,focus,study,sleep,meditation,brainwave,beats,alpha,theta,concentration,relax",
+  "description": "NeuraWave plays steady binaural and isochronic tones for focus, rest and sleep. It's quiet, simple, and works with the screen locked.\n\nPRESETS\n- Deep Sleep: Delta, 2.5 Hz\n- Meditation: Theta, 6 Hz\n- Relax: Alpha, 10 Hz\n- Calm Focus: SMR, 14 Hz\n- Deep Focus: Beta, 16 Hz\n- Peak Concentration: Gamma, 40 Hz\n\nFOCUS PROGRAMS\nPrograms move through presets for you with smooth, click-free transitions:\n- Study Flow: settle with Alpha, then 30 minutes of Beta\n- Coding Sprint: Beta warm-up, Gamma peak, Alpha cool-down\n- Mental Rest: Alpha into Theta and back\n\nMADE FOR YOUR DAY\n- Plays in the background and from the lock screen\n- AirPods: press to pause or resume, double-press to skip presets\n- Sleep timers that fade out gently over the last 30 seconds\n- Pauses for calls and when you take out your headphones\n- Optional ambient noise, and an option to play over your music\n\nPRIVATE BY DESIGN\nNo account, no analytics, no ads, no network access. NeuraWave is free and open source.\n\nBinaural tones need headphones. Isochronic tones also work on the speaker.\n\nNeuraWave is not a medical device and isn't intended to diagnose, treat or prevent any condition. If you have epilepsy or are sensitive to pulsing stimuli, talk to a doctor before using isochronic tones.",
+  "whatToTest": "Start a preset with headphones on and lock the phone. Try pausing from the lock screen and with AirPods, take a call mid-session, and take your AirPods out.",
+  "reviewNotes": "NeuraWave generates audio tones in real time (no media files) and uses the audio background mode so playback continues with the screen locked. To test it, tap Start on the main screen; headphones are recommended for Binaural. No login is required."
+}
