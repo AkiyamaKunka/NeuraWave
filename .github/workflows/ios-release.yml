@@ -7,6 +7,9 @@
 #                                          also push the listing and submit for review
 #   tag push ios-v<x.y>                 -> upload + listing + submit (x.y must equal
 #                                          MARKETING_VERSION in Apps/iOS/project.yml)
+#   tag push ios-beta-<anything>        -> upload + listing, no submission. Works before
+#                                          this file reaches the default branch, which
+#                                          "Run workflow" needs.
 #   Never on pull_request: the repo is public and this job holds the API key.
 #
 # SECRETS (repo Settings -> Secrets and variables -> Actions)
@@ -27,6 +30,7 @@ on:
   push:
     tags:
       - 'ios-v*'
+      - 'ios-beta-*'
   workflow_dispatch:
     inputs:
       listing:
@@ -90,6 +94,8 @@ jobs:
             tag=${GITHUB_REF#refs/tags/ios-v}
             [[ "$tag" == "$version" ]] || { echo "::error::tag says $tag but project.yml says $version"; exit 1; }
             listing=true; submit=true
+          elif [[ "$GITHUB_REF" == refs/tags/ios-beta-* ]]; then
+            listing=true; submit=false
           else
             listing=${{ inputs.listing }}; submit=${{ inputs.submit }}
           fi
