@@ -43,7 +43,7 @@ on:
         type: boolean
         default: false
       existing_build:
-        description: Skip building and use this already uploaded build number
+        description: Skip building and use this already uploaded build number ("status" just prints the review status)
         type: string
         default: ""
 
@@ -107,6 +107,7 @@ jobs:
           fi
           number=$((BUILD_NUMBER_OFFSET + GITHUB_RUN_NUMBER)); build=true
           if [[ -n "${{ inputs.existing_build }}" ]]; then number=${{ inputs.existing_build }}; build=false; fi
+          [[ "$number" != status ]] || { listing=false; submit=false; }
           {
             echo "version=$version"; echo "number=$number"
             echo "listing=$listing"; echo "submit=$submit"; echo "build=$build"
@@ -211,6 +212,7 @@ jobs:
           python3 -m pip install --quiet --break-system-packages 'pyjwt[crypto]' requests \
             || python3 -m pip install --quiet 'pyjwt[crypto]' requests
           n=${{ steps.plan.outputs.number }}
+          if [[ "${{ inputs.existing_build }}" == status ]]; then python3 scripts/asc.py status; exit 0; fi
           python3 scripts/asc.py testflight "$n"
           if [[ "${{ steps.plan.outputs.listing }}" == true || "${{ steps.plan.outputs.submit }}" == true ]]; then
             python3 scripts/asc.py listing "$n"

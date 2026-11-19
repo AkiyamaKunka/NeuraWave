@@ -327,6 +327,16 @@ def submit():
     print(f"version {version['attributes']['versionString']} submitted for App Review")
 
 
+def status():
+    app = app_id()
+    for v in call("GET", f"/v1/apps/{app}/appStoreVersions", params={"filter[platform]": "IOS"})["data"]:
+        a = v["attributes"]
+        print(f"version {a['versionString']}: {a.get('appStoreState')} / {a.get('appVersionState')}")
+    for r in call("GET", "/v1/reviewSubmissions", params={"filter[app]": app, "limit": 10})["data"]:
+        a = r["attributes"]
+        print(f"review submission {r['id']}: {a.get('state')} submitted {a.get('submittedDate')}")
+
+
 if __name__ == "__main__":
     command, *args = sys.argv[1:] or ["help"]
     if command == "wait-build":
@@ -337,6 +347,8 @@ if __name__ == "__main__":
         listing(int(args[0]))
     elif command == "submit":
         submit()
+    elif command == "status":
+        status()
     else:
         print(__doc__)
         sys.exit(2)
