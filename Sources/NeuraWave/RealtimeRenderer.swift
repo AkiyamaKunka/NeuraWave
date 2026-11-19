@@ -213,13 +213,43 @@ struct Voice {
         envelope.reset()
     }
 
-    /// Next stereo tone sample in [-1, 1] (before volume and fades).
+    /// Isochronic pulse depth: 1 = the tone swells from silence to full and
+    /// back on every beat (100% amplitude modulation, as in the 40 Hz
+    /// auditory steady-state literature RESEARCH.md cites). The swell is a
+    /// smooth sine, so there are no clicks at the silent points.
+    static let isochronicDepth: Float = 1.0
+
+    /// Isochronic pulses spend time quieter than full level; this restores
+    /// the same average loudness (RMS) the original 45–100% pulses had, so
+    /// switching styles or updating doesn't make the tone quieter.
+    /// A precomputed constant (no lazy initialization on the audio thread):
+    /// √(meanSquare(0.55) / meanSquare(isochronicDepth)), checked by
+    /// IsochronicTests against `loudnessFactor(depth:)`.
+    static let isochronicLoudness: Float = 1.2257
+
+    /// Mean square of the envelope 1 − d + d·u with u = ½ + ½·sin
+    /// (E[u] = ½, E[u²] = ⅜), relative to the original 0.55 depth.
+    static func loudnessFactor(depth: Float) -> Float {
+        func meanSquare(_ d: Float) -> Float {
+            let floor = 1 - d
+            return floor * floor + 2 * floor * d * 0.5 + d * d * 0.375
+        }
+        return (meanSquare(0.55) / meanSquare(depth)).squareRoot()
+    }
+
+    /// Next stereo tone sample (before volume and fades). Peaks stay within
+    /// [-1.25, 1.25]; the caller's levels keep the output well inside ±1.
     @inline(__always)
     mutating func next() -> (left: Float, right: Float) {
         guard let rotations else { return (0, 0) }
         let pulse = envelope.next(rotations.envelope)
-        // Isochronic: the tone pulses between 45% and 100% at the beat rate.
-        let level: Float = tone.style == .isochronic ? 0.45 + 0.55 * Float(0.5 + 0.5 * pulse) : 1
+        let level: Float
+        if tone.style == .isochronic {
+            let swell = Float(0.5 + 0.5 * pulse)
+            level = (1 - Self.isochronicDepth + Self.isochronicDepth * swell) * Self.isochronicLoudness
+        } else {
+            level = 1
+        }
         return (Float(left.next(rotations.left)) * level, Float(right.next(rotations.right)) * level)
     }
 
