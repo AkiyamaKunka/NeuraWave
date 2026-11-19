@@ -42,6 +42,10 @@ on:
         description: Also submit that version to App Review
         type: boolean
         default: false
+      existing_build:
+        description: Skip building and use this already uploaded build number
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -101,10 +105,11 @@ jobs:
           else
             listing=${{ inputs.listing }}; submit=${{ inputs.submit }}
           fi
-          number=$((BUILD_NUMBER_OFFSET + GITHUB_RUN_NUMBER))
+          number=$((BUILD_NUMBER_OFFSET + GITHUB_RUN_NUMBER)); build=true
+          if [[ -n "${{ inputs.existing_build }}" ]]; then number=${{ inputs.existing_build }}; build=false; fi
           {
             echo "version=$version"; echo "number=$number"
-            echo "listing=$listing"; echo "submit=$submit"
+            echo "listing=$listing"; echo "submit=$submit"; echo "build=$build"
           } >> "$GITHUB_OUTPUT"
           echo "## NeuraWave iOS $version ($number): listing=$listing, submit=$submit" >> "$GITHUB_STEP_SUMMARY"
 
@@ -141,11 +146,11 @@ jobs:
           echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
 
       - name: Generate the Xcode project
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.secrets.outputs.ready == 'true' && steps.plan.outputs.build == 'true'
         run: brew install xcodegen && cd Apps/iOS && xcodegen
 
       - name: Archive (cloud signing)
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.secrets.outputs.ready == 'true' && steps.plan.outputs.build == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -165,7 +170,7 @@ jobs:
             -quiet
 
       - name: Upload to App Store Connect
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.secrets.outputs.ready == 'true' && steps.plan.outputs.build == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}

@@ -193,7 +193,7 @@ def set_age_rating(app_info):
     known = declaration["attributes"]
     attributes = {}
     for key, value in known.items():
-        if key in ("kidsAgeBand", "ageRatingOverride", "ageRatingOverrideV2", "koreaAgeRatingOverride", "developerAgeRatingInfoUrl"):
+        if key in ("kidsAgeBand", "developerAgeRatingInfoUrl") or "Override" in key or "Classification" in key:
             continue
         if isinstance(value, bool) or value is None and key in (
             "gambling", "unrestrictedWebAccess", "lootBox", "messagingAndChat", "userGeneratedContent",
@@ -215,9 +215,18 @@ def set_age_rating(app_info):
         for error in errors:
             name = error.get("source", {}).get("pointer", "").rsplit("/", 1)[-1]
             detail = error.get("detail", "")
-            if name not in attributes or "Expected a" not in detail:
-                fail(f"age rating: {detail}")
-            attributes[name] = False if "Expected a BOOLEAN" in detail else "NONE"
+            if name not in attributes:
+                # e.g. "'x' cannot be set unless 'y' is ...": leave x alone
+                name = next((k for k in attributes if f"'{k}'" in detail), None)
+                if name is None:
+                    fail(f"age rating: {detail}")
+                attributes.pop(name)
+            elif "Expected a BOOLEAN" in detail:
+                attributes[name] = False
+            elif "Expected a" in detail:
+                attributes[name] = "NONE"
+            else:
+                attributes.pop(name)
     fail("age rating: still rejected after 5 tries")
 
 
