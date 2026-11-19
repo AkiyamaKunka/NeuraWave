@@ -231,8 +231,7 @@ def set_age_rating(app_info):
 
 
 def set_free_price(app):
-    if call("GET", f"/v1/apps/{app}/appPriceSchedule", ok=(200, 404)).get("data"):
-        return
+    # A new app reports an empty schedule, so always post one; posting again is harmless.
     points = call("GET", f"/v1/apps/{app}/appPricePoints", params={"filter[territory]": "USA", "limit": 200})["data"]
     free = next(p for p in points if float(p["attributes"]["customerPrice"]) == 0)
     call("POST", "/v1/appPriceSchedules", {
