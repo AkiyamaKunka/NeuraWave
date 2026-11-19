@@ -119,10 +119,24 @@ jobs:
           mkdir -p "$RUNNER_TEMP/asc"
           key="$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
           if [[ -n "$ASC_API_KEY_P8" ]]; then
-            printf '%s\n' "$ASC_API_KEY_P8" > "$key"
+            printf '%s' "$ASC_API_KEY_P8" > "$key.raw"
           else
-            printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$key"
+            printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$key.raw"
           fi
+          # A key pasted through an editor can pick up CRs, spaces, smart dashes or lose its
+          # line breaks. Rebuild a clean PEM from the base64 body; print only its shape.
+          python3 - "$key.raw" "$key" <<'PY'
+          import base64, re, sys
+          raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          body = re.sub(r"-+\s*(BEGIN|END)[^-]*-+", " ", raw.replace("\u2014", "--").replace("\u2013", "-"))
+          body = re.sub(r"[^A-Za-z0-9+/=]", "", body)
+          der = base64.b64decode(body + "=" * (-len(body) % 4))
+          print(f"key text: {len(raw)} chars, {raw.count(chr(10))} newlines, CR={chr(13) in raw}, "
+                f"non-ASCII={sum(ord(c) > 127 for c in raw)}; decoded {len(der)} bytes")
+          lines = [body[i:i + 64] for i in range(0, len(body), 64)]
+          open(sys.argv[2], "w").write("-----BEGIN PRIVATE KEY-----\n" + "\n".join(lines) + "\n-----END PRIVATE KEY-----\n")
+          PY
+          rm -f "$key.raw"
           chmod 600 "$key"
           echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
 
