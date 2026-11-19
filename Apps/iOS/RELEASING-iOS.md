@@ -9,7 +9,7 @@ uploads the app to App Store Connect. It can also push the App Store listing in
 1. **Create the app record.** In [App Store Connect](https://appstoreconnect.apple.com/apps)
    choose **+ → New App**:
    - Platform: iOS
-   - Name: NeuraWave
+   - Name: NeuraWave: Brainwave Tones (plain "NeuraWave" is taken on the App Store; the home screen still says NeuraWave)
    - Language: English (U.S.)
    - Bundle ID: com.akiyamakunka.NeuraWave
    - SKU: neurawave-ios
