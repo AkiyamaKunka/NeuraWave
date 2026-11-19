@@ -66,6 +66,12 @@ struct BrainwavePreset: Identifiable, Hashable {
         )
     ]
 
+    /// "2.5 Hz", "16 Hz".
+    var beatLabel: String {
+        let number = beat == beat.rounded() ? String(Int(beat)) : String(format: "%.1f", beat)
+        return number + " Hz"
+    }
+
     /// Non-fatal lookup: an id that no longer exists (corrupted defaults,
     /// hand-written argument) falls back to a neutral preset instead of
     /// crashing the app on a force-unwrap.
@@ -110,6 +116,9 @@ struct FocusProgram: Identifiable, Hashable {
     }
 
     var totalSeconds: TimeInterval { steps.reduce(0) { $0 + $1.seconds } }
+
+    /// "Alpha→Beta".
+    var bandSummary: String { steps.map(\.preset.band).joined(separator: "→") }
 
     /// Index of the step playing `elapsed` seconds into the program (the last
     /// step once the schedule is over; negative time counts as the start).
@@ -158,5 +167,29 @@ struct FocusProgram: Identifiable, Hashable {
 
     private static func byId(_ id: String) -> BrainwavePreset {
         BrainwavePreset.all.first { $0.id == id }!
+    }
+}
+
+enum TimeFormat {
+    /// Countdown text: "05:00", "90:00" (minutes keep counting past 59).
+    static func clock(_ seconds: Int) -> String {
+        let seconds = max(0, seconds)
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+enum ToneStyle: String, CaseIterable, Identifiable {
+    case binaural = "Binaural"
+    case isochronic = "Isochronic"
+
+    var id: String { rawValue }
+
+    var tip: String {
+        switch self {
+        case .binaural:
+            return "Two tones, one per ear · headphones recommended"
+        case .isochronic:
+            return "Pulsing single tone · works with speakers"
+        }
     }
 }

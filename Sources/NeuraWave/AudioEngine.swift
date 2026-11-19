@@ -1,314 +1,19 @@
 import AVFoundation
-import Combine
-import os
-
-enum ToneStyle: String, CaseIterable, Identifiable {
-    case binaural = "Binaural"
-    case isochronic = "Isochronic"
-
-    var id: String { rawValue }
-
-    var tip: String {
-        switch self {
-        case .binaural:
-            return "Two tones, one per ear · headphones recommended"
-        case .isochronic:
-            return "Pulsing single tone · works with speakers"
-        }
-    }
-}
-
-/// Mutable state shared with the realtime audio thread.
-///
-/// Ownership rules (they are what keeps updates from being lost):
-/// - The main thread owns `running`, `volume`, `noiseEnabled` and
-///   `pendingTone`; the render thread only reads them (and *takes*
-///   `pendingTone` under the lock).
-/// - The render thread owns `tone`, `gain`, the phases, the noise generator
-///   and the counters; the main thread only reads them.
-/// The render callback therefore never writes back a field another thread may
-/// have changed while it was rendering.
-final class RealtimeState: @unchecked Sendable {
-    private struct ToneConfig {
-        var carrier: Double
-        var beat: Double
-        var style: ToneStyle
-    }
-
-    private let lock = OSAllocatedUnfairLock()
-    // Main-thread owned.
-    private var pendingTone: ToneConfig?
-    private var running = false
-    private var volume: Float = 0.385
-    private var noiseEnabled = false
-    private var requestCount: UInt64 = 0
-    /// Requests superseded by a newer one before the render thread applied
-    /// them (two changes within one crossfade dip). Intentional, not lost.
-    private var coalescedCount: UInt64 = 0
-    // Render-thread owned.
-    private var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
-    private var gain: Float = 0
-    /// Per-sample smoothed levels, so dragging the volume slider or toggling
-    /// noise glides instead of stepping (no zipper noise / clicks).
-    private var smoothedVolume: Float = 0.385
-    private var smoothedNoise: Float = 0
-    private var levelsPrimed = false
-    private var quickRamp = false
-    /// True while the gain is being dipped to silence for a live switch, so
-    /// the swap is followed by the quick ramp back up. A request applied from
-    /// silence (session start, resume) keeps the slow, gentle fade-in.
-    private var switchDip = false
-    private var phaseLeft: Double = 0
-    private var phaseRight: Double = 0
-    private var envelopePhase: Double = 0
-    private var framesRendered: UInt64 = 0
-    private var nanCount: UInt64 = 0
-    private var clipCount: UInt64 = 0
-    private var switchCount: UInt64 = 0
-    /// Smoothed noise source: a fixed, preallocated buffer (no allocation on
-    /// the audio thread) with a running sum and a cheap inline PRNG.
-    private static let noiseRowCount = 16
-    private let noiseRows = UnsafeMutablePointer<Float>.allocate(capacity: noiseRowCount)
-    private var noiseSum: Float = 0
-    private var rngState: UInt32 = 0x9E37_79B9
-
-    // Gain-ramp durations: slow fade for start/stop, quick dip for live switches.
-    private let startStopFadeSeconds = 2.0
-    private let crossfadeDownSeconds = 0.06
-    private let crossfadeUpSeconds = 0.15
-
-    init() {
-        noiseRows.initialize(repeating: 0, count: Self.noiseRowCount)
-    }
-
-    deinit {
-        noiseRows.deallocate()
-    }
-
-    /// Request a new configuration. The render thread applies it once the
-    /// output is silent: if audio is audible it first dips to silence, swaps
-    /// parameters (phases reset while inaudible), and ramps back up — no node
-    /// rebuild, no click.
-    func configure(preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool) {
-        lock.withLock {
-            if pendingTone != nil {
-                coalescedCount += 1
-            }
-            pendingTone = ToneConfig(carrier: preset.carrier, beat: preset.beat, style: style)
-            requestCount += 1
-            self.volume = volume
-            self.noiseEnabled = noiseEnabled
-        }
-    }
-
-    func setRunning(_ value: Bool) {
-        lock.withLock { running = value }
-    }
-
-    func update(volume: Float, noiseEnabled: Bool) {
-        lock.withLock {
-            self.volume = volume
-            self.noiseEnabled = noiseEnabled
-        }
-    }
-
-    /// Called only while no render callback can run (node detached), so a
-    /// rebuilt node fades in from silence instead of starting at full level.
-    func resetGain() {
-        lock.withLock {
-            gain = 0
-            quickRamp = false
-            switchDip = false
-        }
-    }
-
-    func render(
-        buffers: UnsafeMutableAudioBufferListPointer,
-        frameCount: Int,
-        sampleRate: Double
-    ) {
-        guard buffers.count >= 2,
-              let left = buffers[0].mData?.assumingMemoryBound(to: Float.self),
-              let right = buffers[1].mData?.assumingMemoryBound(to: Float.self) else {
-            return
-        }
-
-        lock.lock()
-        var tone = self.tone
-        // Take ownership of the pending request; if it is not applied in this
-        // buffer it is handed back below (unless a newer one arrived).
-        var pending = self.pendingTone
-        self.pendingTone = nil
-        let running = self.running
-        let volume = self.volume
-        let noiseEnabled = self.noiseEnabled
-        var gain = self.gain
-        var smoothedVolume = self.smoothedVolume
-        var smoothedNoise = self.smoothedNoise
-        if !self.levelsPrimed {
-            // First buffer ever: start at the requested level, don't glide in.
-            smoothedVolume = volume
-            smoothedNoise = noiseEnabled ? 1 : 0
-            self.levelsPrimed = true
-        }
-        var quickRamp = self.quickRamp
-        var switchDip = self.switchDip
-        var phaseLeft = self.phaseLeft
-        var phaseRight = self.phaseRight
-        var envelopePhase = self.envelopePhase
-        lock.unlock()
-
-        let twoPi = 2.0 * Double.pi
-        let slowFadeFrames = Float(sampleRate * startStopFadeSeconds)
-        let quickDownFrames = Float(sampleRate * crossfadeDownSeconds)
-        let quickUpFrames = Float(sampleRate * crossfadeUpSeconds)
-        let rowCount = Self.noiseRowCount
-        // ~25 ms one-pole glide toward the requested levels.
-        let smoothing = Float(1 - exp(-1 / (sampleRate * 0.025)))
-        let noiseTarget: Float = noiseEnabled ? 1 : 0
-        var nanCount = 0
-        var clipCount = 0
-        var switchesApplied = 0
-
-        for i in 0..<frameCount {
-            // Crossfade state machine: when a pending config exists, ramp to
-            // silence first; once silent, swap parameters and head back up.
-            if let pendingTone = pending, gain <= 0.001 {
-                tone = pendingTone
-                pending = nil
-                phaseLeft = 0
-                phaseRight = 0
-                envelopePhase = 0
-                quickRamp = switchDip
-                switchDip = false
-                switchesApplied += 1
-            }
-
-            var target: Float = running ? 1 : 0
-            if pending != nil && gain > 0.001 {
-                target = 0
-                switchDip = true
-            }
-
-            let fadeFrames: Float
-            if pending != nil {
-                fadeFrames = quickDownFrames
-            } else if quickRamp {
-                fadeFrames = quickUpFrames
-            } else {
-                fadeFrames = slowFadeFrames
-            }
-            let step = 1.0 / max(fadeFrames, 1)
-            if gain < target {
-                gain = min(target, gain + step)
-            } else if gain > target {
-                gain = max(target, gain - step)
-            }
-            if abs(gain - target) <= step {
-                quickRamp = false
-            }
-
-            let stepLeft = twoPi * tone.carrier / sampleRate
-            let stepRight = twoPi * (tone.carrier + (tone.style == .binaural ? tone.beat : 0)) / sampleRate
-            let envelopeStep = twoPi * tone.beat / sampleRate
-
-            let envelope: Float
-            if tone.style == .isochronic {
-                envelope = 0.45 + 0.55 * Float(0.5 + 0.5 * sin(envelopePhase))
-            } else {
-                envelope = 1
-            }
-
-            smoothedVolume += (volume - smoothedVolume) * smoothing
-            smoothedNoise += (noiseTarget - smoothedNoise) * smoothing
-            let toneLevel = 0.36 * smoothedVolume
-            let noiseLevel = 0.10 * smoothedVolume * smoothedNoise
-            let toneSample = toneLevel * envelope * gain
-            let leftSample = Float(sin(phaseLeft)) * toneSample
-            let rightSample = Float(sin(phaseRight)) * toneSample
-
-            var noise: Float = 0
-            if smoothedNoise > 0.0001 {
-                // xorshift32: allocation- and syscall-free, fine for noise.
-                rngState ^= rngState << 13
-                rngState ^= rngState >> 17
-                rngState ^= rngState << 5
-                let row = Int(rngState % UInt32(rowCount))
-                let value = Float(rngState >> 8) / Float(1 << 23) - 1
-                noiseSum += value - noiseRows[row]
-                noiseRows[row] = value
-                noise = noiseSum / Float(rowCount)
-            }
-
-            let noiseSample = noise * noiseLevel * gain
-            var leftOutput = leftSample + noiseSample
-            var rightOutput = rightSample + noiseSample
-            if leftOutput.isNaN || rightOutput.isNaN {
-                nanCount += 1
-                if leftOutput.isNaN { leftOutput = 0 }
-                if rightOutput.isNaN { rightOutput = 0 }
-            }
-            if abs(leftOutput) > 1 || abs(rightOutput) > 1 {
-                clipCount += 1
-            }
-            left[i] = max(-1, min(1, leftOutput))
-            right[i] = max(-1, min(1, rightOutput))
-
-            phaseLeft += stepLeft
-            phaseRight += stepRight
-            envelopePhase += envelopeStep
-            if phaseLeft > twoPi { phaseLeft -= twoPi }
-            if phaseRight > twoPi { phaseRight -= twoPi }
-            if envelopePhase > twoPi { envelopePhase -= twoPi }
-        }
-
-        lock.lock()
-        self.tone = tone
-        if self.pendingTone == nil {
-            // Still mid-dip: keep the request for the next buffer.
-            self.pendingTone = pending
-        } else if pending != nil {
-            // A request that arrived during this render is newer and wins;
-            // the one this render was still holding is superseded.
-            self.coalescedCount += 1
-        }
-        self.gain = gain
-        self.smoothedVolume = smoothedVolume
-        self.smoothedNoise = smoothedNoise
-        self.quickRamp = quickRamp
-        self.switchDip = switchDip
-        self.phaseLeft = phaseLeft
-        self.phaseRight = phaseRight
-        self.envelopePhase = envelopePhase
-        self.framesRendered += UInt64(frameCount)
-        self.nanCount += UInt64(nanCount)
-        self.clipCount += UInt64(clipCount)
-        self.switchCount += UInt64(switchesApplied)
-        lock.unlock()
-    }
-
-    /// Configuration requests made so far (autotest compares this with the
-    /// number of switches the render thread actually applied).
-    func requests() -> (requested: UInt64, coalesced: UInt64) {
-        lock.withLock { (requestCount, coalescedCount) }
-    }
-
-    func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
-        lock.lock()
-        defer { lock.unlock() }
-        return (framesRendered, nanCount, clipCount, switchCount, gain)
-    }
-}
 
 /// Main-thread only (SessionController, menu bar, notifications on .main).
 /// The realtime render path lives in `RealtimeState` and never touches this.
 @MainActor
-final class AudioEngine: ObservableObject {
-    @Published private(set) var isPlaying = false
+final class AudioEngine {
+    /// A session is active (playing or paused); false once stopped.
+    private(set) var isPlaying = false
 
     /// Called on the main thread when the output can't be (re)started after
     /// a device change, so the session can stop instead of "playing" silence.
     var onOutputFailure: (() -> Void)?
+
+    /// How long after stop/pause the output chain is released: the 2 s fade
+    /// plus a margin, so the fade is never cut off.
+    private static let releaseDelay: TimeInterval = 2.4
 
     private let engine = AVAudioEngine()
     private let state = RealtimeState()
@@ -318,7 +23,15 @@ final class AudioEngine: ObservableObject {
     private var stopGeneration = 0
     private var isPaused = false
     private var keepAwakeActivity: NSObjectProtocol?
-    private var lastConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool)?
+    /// What to (re)build the output with after a pause or device change.
+    private struct Config {
+        var preset: BrainwavePreset
+        var style: ToneStyle
+        var volume: Float
+        var noiseEnabled: Bool
+    }
+
+    private var lastConfig: Config?
     // Written once in init, read in the nonisolated deinit.
     nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
     private var pendingRebuild: DispatchWorkItem?
@@ -346,7 +59,7 @@ final class AudioEngine: ObservableObject {
     func start(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) -> Bool {
         stopGeneration += 1
         isPaused = false
-        lastConfig = (preset, style, volume, noiseEnabled)
+        lastConfig = Config(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
 
         // The system stopped the engine under us (device change during a
         // stop fade): don't reuse that node mid-fade, rebuild from silence.
@@ -364,12 +77,15 @@ final class AudioEngine: ObservableObject {
                   let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
                 return false
             }
+            // Safe: no node is attached, so no render callback can be running
+            // (resetGain writes render-owned state).
             state.resetGain()
             let node = Self.makeSourceNode(format: format, sampleRate: sampleRate, state: state)
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
             sourceNode = node
             nodeSampleRate = sampleRate
+            requestLargeIOBuffer()
         }
 
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
@@ -412,7 +128,7 @@ final class AudioEngine: ObservableObject {
     /// Live parameter change without rebuilding the node: the render thread
     /// crossfades through silence, so switching is click-free.
     func switchTo(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) {
-        lastConfig = (preset, style, volume, noiseEnabled)
+        lastConfig = Config(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
     }
 
@@ -425,7 +141,7 @@ final class AudioEngine: ObservableObject {
         // Let the fade-out finish (~2s) before tearing the node down. A newer
         // start() bumps stopGeneration, so this can never kill a live session.
         let generation = stopGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.releaseDelay) { [weak self] in
             guard let self, self.stopGeneration == generation else { return }
             self.teardownNode()
             self.isPlaying = false
@@ -433,9 +149,8 @@ final class AudioEngine: ObservableObject {
     }
 
     func update(volume: Float, noiseEnabled: Bool) {
-        if let cfg = lastConfig {
-            lastConfig = (cfg.preset, cfg.style, volume, noiseEnabled)
-        }
+        lastConfig?.volume = volume
+        lastConfig?.noiseEnabled = noiseEnabled
         state.update(volume: volume, noiseEnabled: noiseEnabled)
     }
 
@@ -447,7 +162,7 @@ final class AudioEngine: ObservableObject {
         isPaused = true
         endKeepAwake()
         let generation = stopGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.releaseDelay) { [weak self] in
             guard let self, self.isPaused, self.stopGeneration == generation else { return }
             self.teardownNode()
         }
@@ -526,6 +241,33 @@ final class AudioEngine: ObservableObject {
             isPlaying = false
             onOutputFailure?()
         }
+    }
+
+    /// Steady tones don't need low latency: up to a ~43 ms IO buffer (2048
+    /// frames at 48 kHz, less where the device caps it) instead of the
+    /// default ~11 ms means far fewer audio wakeups, for less CPU and energy. Switches and pauses are fades of
+    /// 60 ms or more anyway. Best effort: the device may clamp or refuse it.
+    private func requestLargeIOBuffer() {
+        guard let unit = engine.outputNode.audioUnit else { return }
+        // Stay inside what the device allows (Bluetooth outputs such as
+        // AirPods cap it, e.g. at 960 frames ≈ 20 ms; still fewer wakeups).
+        var range = AudioValueRange()
+        var rangeSize = UInt32(MemoryLayout<AudioValueRange>.size)
+        let gotRange = AudioUnitGetProperty(
+            unit, kAudioDevicePropertyBufferFrameSizeRange, kAudioUnitScope_Global, 0, &range, &rangeSize
+        ) == noErr
+        var frames: UInt32 = 2048
+        if gotRange, range.mMaximum > 0 {
+            frames = UInt32(min(max(Double(frames), range.mMinimum), range.mMaximum))
+        }
+        AudioUnitSetProperty(
+            unit,
+            kAudioDevicePropertyBufferFrameSize,
+            kAudioUnitScope_Global,
+            0,
+            &frames,
+            UInt32(MemoryLayout<UInt32>.size)
+        )
     }
 
     private func beginKeepAwake() {

@@ -16,38 +16,26 @@ final class NowPlayingController {
 
     private init() {
         let center = MPRemoteCommandCenter.shared()
-        center.togglePlayPauseCommand.addTarget { _ in
+        Self.route(center.togglePlayPauseCommand, "togglePlayPause") { $0.togglePlayPause() }
+        Self.route(center.playCommand, "play") { $0.resumeOrStart() }
+        Self.route(center.pauseCommand, "pause") { $0.pausePlayback() }
+        Self.route(center.nextTrackCommand, "next") { $0.nextPreset() }
+        Self.route(center.previousTrackCommand, "previous") { $0.previousPreset() }
+    }
+
+    /// Forward a remote command to the session on the main actor (unless a
+    /// self-test is isolating the session from outside input).
+    private static func route(
+        _ command: MPRemoteCommand,
+        _ name: String,
+        _ action: @escaping @MainActor @Sendable (SessionController) -> Void
+    ) {
+        command.addTarget { _ in
             Task { @MainActor in
                 let session = SessionController.shared
-                if session.shouldHandleRemoteCommand("togglePlayPause") { session.togglePlayPause() }
-            }
-            return .success
-        }
-        center.playCommand.addTarget { _ in
-            Task { @MainActor in
-                let session = SessionController.shared
-                if session.shouldHandleRemoteCommand("play") { session.resumeOrStart() }
-            }
-            return .success
-        }
-        center.pauseCommand.addTarget { _ in
-            Task { @MainActor in
-                let session = SessionController.shared
-                if session.shouldHandleRemoteCommand("pause") { session.pausePlayback() }
-            }
-            return .success
-        }
-        center.nextTrackCommand.addTarget { _ in
-            Task { @MainActor in
-                let session = SessionController.shared
-                if session.shouldHandleRemoteCommand("next") { session.nextPreset() }
-            }
-            return .success
-        }
-        center.previousTrackCommand.addTarget { _ in
-            Task { @MainActor in
-                let session = SessionController.shared
-                if session.shouldHandleRemoteCommand("previous") { session.previousPreset() }
+                if session.shouldHandleRemoteCommand(name) {
+                    action(session)
+                }
             }
             return .success
         }
