@@ -20,7 +20,7 @@ uploads the app to App Store Connect. It can also push the App Store listing in
 3. **Add three repository secrets.** In GitHub, go to NeuraWave → Settings → Secrets and variables → Actions → New repository secret:
    - `ASC_KEY_ID`: the key ID from the list.
    - `ASC_ISSUER_ID`: the Issuer ID shown above the list.
-   - `ASC_API_KEY_P8_BASE64`: the output of `base64 -i AuthKey_XXXX.p8 | pbcopy`, pasted.
+   - `ASC_API_KEY_P8`: open the .p8 in TextEdit, copy all of it, paste it as the value. (`ASC_API_KEY_P8_BASE64`, the file in base64, works too.)
 4. **Answer App Privacy.** In the app's page, go to App Privacy → Get Started and choose
    **"No, we do not collect data from this app"**. The API can't set this answer. See
    [PRIVACY.md](../../PRIVACY.md) for why that's accurate.
