@@ -67,6 +67,12 @@ public final class AudioEngine {
             teardownNode()
         }
 
+        #if os(iOS)
+        // Before reading the output format: an inactive session may report
+        // the wrong route.
+        guard PlaybackAudioSession.activate() else { return false }
+        #endif
+
         if sourceNode == nil {
             // Building a fresh chain supersedes any queued device rebuild.
             pendingRebuild?.cancel()
@@ -143,7 +149,7 @@ public final class AudioEngine {
         let generation = stopGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.releaseDelay) { [weak self] in
             guard let self, self.stopGeneration == generation else { return }
-            self.teardownNode()
+            self.teardownNode(releasingAudioSession: true)
             self.isPlaying = false
         }
     }
@@ -269,9 +275,6 @@ public final class AudioEngine {
             &frames,
             UInt32(MemoryLayout<UInt32>.size)
         )
-        #else
-        // iOS: the audio session owns the IO buffer; it clamps per route.
-        try? AVAudioSession.sharedInstance().setPreferredIOBufferDuration(0.04)
         #endif
     }
 
@@ -296,7 +299,9 @@ public final class AudioEngine {
 
     /// Releases the output chain. Session state (isPlaying/isPaused) is the
     /// caller's business, so a paused session survives its node going away.
-    private func teardownNode() {
+    /// On iOS a finished stop also hands audio back to other apps; a pause
+    /// keeps the session so the lock screen and AirPods can resume it.
+    private func teardownNode(releasingAudioSession: Bool = false) {
         engine.stop()
         if let node = sourceNode {
             engine.disconnectNodeOutput(node)
@@ -304,6 +309,11 @@ public final class AudioEngine {
             sourceNode = nil
         }
         endKeepAwake()
+        #if os(iOS)
+        if releasingAudioSession {
+            PlaybackAudioSession.deactivate()
+        }
+        #endif
     }
 
     deinit {
