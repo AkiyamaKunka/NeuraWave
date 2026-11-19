@@ -11,10 +11,10 @@ menu bar soul.
 [![CI](https://github.com/AkiyamaKunka/NeuraWave/actions/workflows/ci.yml/badge.svg)](https://github.com/AkiyamaKunka/NeuraWave/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)]()
-[![v1.4.0](https://img.shields.io/badge/release-v1.4.0-orange)](https://github.com/AkiyamaKunka/NeuraWave/releases)
+[![Latest release](https://img.shields.io/github/v/release/AkiyamaKunka/NeuraWave?color=orange)](https://github.com/AkiyamaKunka/NeuraWave/releases)
 
-<a href="https://github.com/AkiyamaKunka/NeuraWave/releases/download/v1.4.0/NeuraWave-1.4.0.dmg">
-  <img src="https://img.shields.io/badge/Download-NeuraWave%201.4.0%20for%20macOS-2ea043?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+<a href="https://github.com/AkiyamaKunka/NeuraWave/releases/latest">
+  <img src="https://img.shields.io/badge/Download-NeuraWave%20for%20macOS-2ea043?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
 </a>
 
 </div>
@@ -61,7 +61,7 @@ menu bar soul.
 
 ## 📦 Install
 
-1. Download **NeuraWave-1.4.0.dmg** from [Releases](https://github.com/AkiyamaKunka/NeuraWave/releases/latest).
+1. Download the latest **NeuraWave-<version>.dmg** from [Releases](https://github.com/AkiyamaKunka/NeuraWave/releases/latest).
 2. Open the DMG and drag NeuraWave into **Applications**.
 3. First launch: **right-click → Open** (ad-hoc signed; Gatekeeper asks once, then it launches normally).
 

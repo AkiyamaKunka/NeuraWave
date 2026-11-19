@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (not yet released)
 
 ### Fixed
 - **Dropped changes:** preset, style and volume changes were sometimes lost (about 30% under load) because the audio thread overwrote them mid-render. A focus program could stay on the wrong band.
