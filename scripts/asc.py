@@ -202,9 +202,23 @@ def set_age_rating(app_info):
             attributes[key] = False
         elif isinstance(value, str) or value is None:
             attributes[key] = "NONE"
-    call("PATCH", f"/v1/ageRatingDeclarations/{declaration['id']}",
-         {"data": {"type": "ageRatingDeclarations", "id": declaration["id"], "attributes": attributes}})
-    print("age rating set")
+    # Apple adds questions over time; a new one whose type we guessed wrong comes
+    # back as a 409 naming the attribute and the type it wants. Fix and retry.
+    for _ in range(5):
+        response = call("PATCH", f"/v1/ageRatingDeclarations/{declaration['id']}",
+                        {"data": {"type": "ageRatingDeclarations", "id": declaration["id"], "attributes": attributes}},
+                        ok=(200, 409))
+        errors = response.get("errors") or []
+        if not errors:
+            print("age rating set")
+            return
+        for error in errors:
+            name = error.get("source", {}).get("pointer", "").rsplit("/", 1)[-1]
+            detail = error.get("detail", "")
+            if name not in attributes or "Expected a" not in detail:
+                fail(f"age rating: {detail}")
+            attributes[name] = False if "Expected a BOOLEAN" in detail else "NONE"
+    fail("age rating: still rejected after 5 tries")
 
 
 def set_free_price(app):
