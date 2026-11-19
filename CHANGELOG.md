@@ -31,6 +31,7 @@
 - New `scripts/make-dmg.sh`: builds a drag-to-Applications DMG (refuses to overwrite an existing one).
 
 ### Changed
+- **Isochronic pulses are full depth:** the tone now swells from silence to full on every beat (100% modulation, as in the 40 Hz research), loudness-matched to the old 45–100% pulses.
 - **Audio rendering:** about 17× cheaper (phasor oscillators instead of per-sample `sin()`); render cost is about 0.03% of real time. A larger output buffer (2048 frames, or the device's maximum, e.g. 960 on AirPods) means far fewer audio wakeups.
 - **Code structure:** split into small, documented types:
   - `SessionClock`, `SettingsStore`;
@@ -45,6 +46,7 @@
 - **Default volume is softer for new installs:** 0.385 instead of 0.55. If you're updating and never moved the slider, you keep the 0.55 you're used to.
 - **Packaging:** release builds are universal (Apple silicon and Intel), and a broken code signature now fails the build instead of shipping.
 - **Self-tests:** they run without a window, Dock or menu bar icon and stay out of Now Playing. They never touch saved settings, and `--autotest-volume 0` makes them silent.
+- **Volume slider feels even:** the slider now follows loudness (a squared amplitude curve), with much finer control at the quiet end. Saved volumes are converted once, so they sound exactly as loud as before.
 
 ## 1.4.0
 - AirPods and Now Playing controls (pause/resume, preset skip).
