@@ -2,17 +2,19 @@ import SwiftUI
 
 struct WaveformView: View {
     let isPlaying: Bool
+    let isPaused: Bool
     let beat: Double
     let color: Color
 
     var body: some View {
         Group {
-            if isPlaying {
+            if isPlaying && !isPaused {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
                     waveCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
                 }
             } else {
-                // Idle: a static canvas — no 30 fps timeline ticking for nothing.
+                // Idle or paused: a static canvas — no 30 fps timeline ticking
+                // for nothing, and the wave freezes when audio is paused.
                 waveCanvas(time: 0)
             }
         }
@@ -22,6 +24,10 @@ struct WaveformView: View {
                 Text("Press Start to play")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if isPaused {
+                Text("Paused")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
             }
         }
     }

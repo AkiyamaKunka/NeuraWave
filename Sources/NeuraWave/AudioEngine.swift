@@ -19,46 +19,85 @@ enum ToneStyle: String, CaseIterable, Identifiable {
 }
 
 /// Mutable state shared with the realtime audio thread.
-private final class RealtimeState: @unchecked Sendable {
-    private struct Config {
+///
+/// Ownership rules (they are what keeps updates from being lost):
+/// - The main thread owns `running`, `volume`, `noiseEnabled` and
+///   `pendingTone`; the render thread only reads them (and *takes*
+///   `pendingTone` under the lock).
+/// - The render thread owns `tone`, `gain`, the phases, the noise generator
+///   and the counters; the main thread only reads them.
+/// The render callback therefore never writes back a field another thread may
+/// have changed while it was rendering.
+final class RealtimeState: @unchecked Sendable {
+    private struct ToneConfig {
         var carrier: Double
         var beat: Double
         var style: ToneStyle
-        var volume: Float
-        var noiseEnabled: Bool
     }
 
     private let lock = OSAllocatedUnfairLock()
-    private var config = Config(carrier: 240, beat: 10, style: .binaural, volume: 0.55, noiseEnabled: false)
-    private var pendingConfig: Config?
+    // Main-thread owned.
+    private var pendingTone: ToneConfig?
     private var running = false
+    private var volume: Float = 0.385
+    private var noiseEnabled = false
+    private var requestCount: UInt64 = 0
+    /// Requests superseded by a newer one before the render thread applied
+    /// them (two changes within one crossfade dip). Intentional, not lost.
+    private var coalescedCount: UInt64 = 0
+    // Render-thread owned.
+    private var tone = ToneConfig(carrier: 240, beat: 10, style: .binaural)
     private var gain: Float = 0
+    /// Per-sample smoothed levels, so dragging the volume slider or toggling
+    /// noise glides instead of stepping (no zipper noise / clicks).
+    private var smoothedVolume: Float = 0.385
+    private var smoothedNoise: Float = 0
+    private var levelsPrimed = false
     private var quickRamp = false
+    /// True while the gain is being dipped to silence for a live switch, so
+    /// the swap is followed by the quick ramp back up. A request applied from
+    /// silence (session start, resume) keeps the slow, gentle fade-in.
+    private var switchDip = false
     private var phaseLeft: Double = 0
     private var phaseRight: Double = 0
     private var envelopePhase: Double = 0
-    private var noiseRows = [Float](repeating: 0, count: 16)
     private var framesRendered: UInt64 = 0
     private var nanCount: UInt64 = 0
     private var clipCount: UInt64 = 0
     private var switchCount: UInt64 = 0
+    /// Smoothed noise source: a fixed, preallocated buffer (no allocation on
+    /// the audio thread) with a running sum and a cheap inline PRNG.
+    private static let noiseRowCount = 16
+    private let noiseRows = UnsafeMutablePointer<Float>.allocate(capacity: noiseRowCount)
+    private var noiseSum: Float = 0
+    private var rngState: UInt32 = 0x9E37_79B9
 
     // Gain-ramp durations: slow fade for start/stop, quick dip for live switches.
     private let startStopFadeSeconds = 2.0
     private let crossfadeDownSeconds = 0.06
     private let crossfadeUpSeconds = 0.15
 
-    /// Request a new configuration. If audio is currently audible the change is
-    /// queued and the render thread dips to silence, swaps parameters (phases
-    /// reset while inaudible), and ramps back up — no node rebuild, no click.
+    init() {
+        noiseRows.initialize(repeating: 0, count: Self.noiseRowCount)
+    }
+
+    deinit {
+        noiseRows.deallocate()
+    }
+
+    /// Request a new configuration. The render thread applies it once the
+    /// output is silent: if audio is audible it first dips to silence, swaps
+    /// parameters (phases reset while inaudible), and ramps back up — no node
+    /// rebuild, no click.
     func configure(preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool) {
-        let next = Config(carrier: preset.carrier, beat: preset.beat, style: style, volume: volume, noiseEnabled: noiseEnabled)
         lock.withLock {
-            if gain > 0.001 {
-                pendingConfig = next
-            } else {
-                applyConfig(next)
+            if pendingTone != nil {
+                coalescedCount += 1
             }
+            pendingTone = ToneConfig(carrier: preset.carrier, beat: preset.beat, style: style)
+            requestCount += 1
+            self.volume = volume
+            self.noiseEnabled = noiseEnabled
         }
     }
 
@@ -68,12 +107,18 @@ private final class RealtimeState: @unchecked Sendable {
 
     func update(volume: Float, noiseEnabled: Bool) {
         lock.withLock {
-            config.volume = volume
-            config.noiseEnabled = noiseEnabled
-            if pendingConfig != nil {
-                pendingConfig!.volume = volume
-                pendingConfig!.noiseEnabled = noiseEnabled
-            }
+            self.volume = volume
+            self.noiseEnabled = noiseEnabled
+        }
+    }
+
+    /// Called only while no render callback can run (node detached), so a
+    /// rebuilt node fades in from silence instead of starting at full level.
+    func resetGain() {
+        lock.withLock {
+            gain = 0
+            quickRamp = false
+            switchDip = false
         }
     }
 
@@ -89,21 +134,38 @@ private final class RealtimeState: @unchecked Sendable {
         }
 
         lock.lock()
-        var config = self.config
-        var pending = self.pendingConfig
+        var tone = self.tone
+        // Take ownership of the pending request; if it is not applied in this
+        // buffer it is handed back below (unless a newer one arrived).
+        var pending = self.pendingTone
+        self.pendingTone = nil
         let running = self.running
+        let volume = self.volume
+        let noiseEnabled = self.noiseEnabled
         var gain = self.gain
+        var smoothedVolume = self.smoothedVolume
+        var smoothedNoise = self.smoothedNoise
+        if !self.levelsPrimed {
+            // First buffer ever: start at the requested level, don't glide in.
+            smoothedVolume = volume
+            smoothedNoise = noiseEnabled ? 1 : 0
+            self.levelsPrimed = true
+        }
         var quickRamp = self.quickRamp
+        var switchDip = self.switchDip
         var phaseLeft = self.phaseLeft
         var phaseRight = self.phaseRight
         var envelopePhase = self.envelopePhase
-        var noiseRows = self.noiseRows
         lock.unlock()
 
         let twoPi = 2.0 * Double.pi
         let slowFadeFrames = Float(sampleRate * startStopFadeSeconds)
         let quickDownFrames = Float(sampleRate * crossfadeDownSeconds)
         let quickUpFrames = Float(sampleRate * crossfadeUpSeconds)
+        let rowCount = Self.noiseRowCount
+        // ~25 ms one-pole glide toward the requested levels.
+        let smoothing = Float(1 - exp(-1 / (sampleRate * 0.025)))
+        let noiseTarget: Float = noiseEnabled ? 1 : 0
         var nanCount = 0
         var clipCount = 0
         var switchesApplied = 0
@@ -111,19 +173,21 @@ private final class RealtimeState: @unchecked Sendable {
         for i in 0..<frameCount {
             // Crossfade state machine: when a pending config exists, ramp to
             // silence first; once silent, swap parameters and head back up.
-            if let pendingConfig = pending, gain <= 0.001 {
-                config = pendingConfig
+            if let pendingTone = pending, gain <= 0.001 {
+                tone = pendingTone
                 pending = nil
                 phaseLeft = 0
                 phaseRight = 0
                 envelopePhase = 0
-                quickRamp = true
+                quickRamp = switchDip
+                switchDip = false
                 switchesApplied += 1
             }
 
             var target: Float = running ? 1 : 0
             if pending != nil && gain > 0.001 {
                 target = 0
+                switchDip = true
             }
 
             let fadeFrames: Float
@@ -144,28 +208,36 @@ private final class RealtimeState: @unchecked Sendable {
                 quickRamp = false
             }
 
-            let stepLeft = twoPi * config.carrier / sampleRate
-            let stepRight = twoPi * (config.carrier + (config.style == .binaural ? config.beat : 0)) / sampleRate
-            let envelopeStep = twoPi * config.beat / sampleRate
+            let stepLeft = twoPi * tone.carrier / sampleRate
+            let stepRight = twoPi * (tone.carrier + (tone.style == .binaural ? tone.beat : 0)) / sampleRate
+            let envelopeStep = twoPi * tone.beat / sampleRate
 
             let envelope: Float
-            if config.style == .isochronic {
+            if tone.style == .isochronic {
                 envelope = 0.45 + 0.55 * Float(0.5 + 0.5 * sin(envelopePhase))
             } else {
                 envelope = 1
             }
 
-            let toneLevel = 0.36 * config.volume
-            let noiseLevel = 0.10 * config.volume * (config.noiseEnabled ? 1 : 0)
-            let tone = toneLevel * envelope * gain
-            let leftSample = Float(sin(phaseLeft)) * tone
-            let rightSample = Float(sin(phaseRight)) * tone
+            smoothedVolume += (volume - smoothedVolume) * smoothing
+            smoothedNoise += (noiseTarget - smoothedNoise) * smoothing
+            let toneLevel = 0.36 * smoothedVolume
+            let noiseLevel = 0.10 * smoothedVolume * smoothedNoise
+            let toneSample = toneLevel * envelope * gain
+            let leftSample = Float(sin(phaseLeft)) * toneSample
+            let rightSample = Float(sin(phaseRight)) * toneSample
 
             var noise: Float = 0
-            if config.noiseEnabled {
-                let row = Int.random(in: 0..<noiseRows.count)
-                noiseRows[row] = Float.random(in: -1...1)
-                noise = noiseRows.reduce(0, +) / Float(noiseRows.count)
+            if smoothedNoise > 0.0001 {
+                // xorshift32: allocation- and syscall-free, fine for noise.
+                rngState ^= rngState << 13
+                rngState ^= rngState >> 17
+                rngState ^= rngState << 5
+                let row = Int(rngState % UInt32(rowCount))
+                let value = Float(rngState >> 8) / Float(1 << 23) - 1
+                noiseSum += value - noiseRows[row]
+                noiseRows[row] = value
+                noise = noiseSum / Float(rowCount)
             }
 
             let noiseSample = noise * noiseLevel * gain
@@ -191,14 +263,23 @@ private final class RealtimeState: @unchecked Sendable {
         }
 
         lock.lock()
-        self.config = config
-        self.pendingConfig = pending
+        self.tone = tone
+        if self.pendingTone == nil {
+            // Still mid-dip: keep the request for the next buffer.
+            self.pendingTone = pending
+        } else if pending != nil {
+            // A request that arrived during this render is newer and wins;
+            // the one this render was still holding is superseded.
+            self.coalescedCount += 1
+        }
         self.gain = gain
+        self.smoothedVolume = smoothedVolume
+        self.smoothedNoise = smoothedNoise
         self.quickRamp = quickRamp
+        self.switchDip = switchDip
         self.phaseLeft = phaseLeft
         self.phaseRight = phaseRight
         self.envelopePhase = envelopePhase
-        self.noiseRows = noiseRows
         self.framesRendered += UInt64(frameCount)
         self.nanCount += UInt64(nanCount)
         self.clipCount += UInt64(clipCount)
@@ -206,53 +287,89 @@ private final class RealtimeState: @unchecked Sendable {
         lock.unlock()
     }
 
-    func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64) {
-        lock.lock()
-        defer { lock.unlock() }
-        return (framesRendered, nanCount, clipCount, switchCount)
+    /// Configuration requests made so far (autotest compares this with the
+    /// number of switches the render thread actually applied).
+    func requests() -> (requested: UInt64, coalesced: UInt64) {
+        lock.withLock { (requestCount, coalescedCount) }
     }
 
-    private func applyConfig(_ next: Config) {
-        config = next
-        phaseLeft = 0
-        phaseRight = 0
-        envelopePhase = 0
+    func diagnostics() -> (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (framesRendered, nanCount, clipCount, switchCount, gain)
     }
 }
 
+/// Main-thread only (SessionController, menu bar, notifications on .main).
+/// The realtime render path lives in `RealtimeState` and never touches this.
+@MainActor
 final class AudioEngine: ObservableObject {
     @Published private(set) var isPlaying = false
+
+    /// Called on the main thread when the output can't be (re)started after
+    /// a device change, so the session can stop instead of "playing" silence.
+    var onOutputFailure: (() -> Void)?
 
     private let engine = AVAudioEngine()
     private let state = RealtimeState()
     private var sourceNode: AVAudioSourceNode?
+    /// Sample rate the current node was built for.
+    private var nodeSampleRate: Double = 0
     private var stopGeneration = 0
+    private var isPaused = false
     private var keepAwakeActivity: NSObjectProtocol?
+    private var lastConfig: (preset: BrainwavePreset, style: ToneStyle, volume: Float, noiseEnabled: Bool)?
+    // Written once in init, read in the nonisolated deinit.
+    nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
+    private var pendingRebuild: DispatchWorkItem?
+    /// Output-chain rebuilds after device changes (autotest diagnostics).
+    private(set) var deviceRebuilds = 0
+
+    init() {
+        // Output device / sample-rate changes (AirPods connecting, headphones
+        // unplugged, …) stop AVAudioEngine. Rebuild the chain at the new
+        // format so an active session keeps playing.
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleRebuildAfterConfigurationChange()
+            }
+        }
+    }
 
     /// Builds the output node on first use and (re)uses it for every later
     /// session. Returns false when no usable output device/format is available.
     @discardableResult
     func start(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) -> Bool {
         stopGeneration += 1
+        isPaused = false
+        lastConfig = (preset, style, volume, noiseEnabled)
+
+        // The system stopped the engine under us (device change during a
+        // stop fade): don't reuse that node mid-fade, rebuild from silence.
+        if sourceNode != nil, !engine.isRunning {
+            teardownNode()
+        }
 
         if sourceNode == nil {
+            // Building a fresh chain supersedes any queued device rebuild.
+            pendingRebuild?.cancel()
+            pendingRebuild = nil
             let output = engine.outputNode
             let sampleRate = output.outputFormat(forBus: 0).sampleRate
             guard sampleRate > 0,
                   let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
                 return false
             }
-            let node = AVAudioSourceNode(format: format) { [state] _, _, frameCount, audioBufferList -> OSStatus in
-                state.render(
-                    buffers: UnsafeMutableAudioBufferListPointer(audioBufferList),
-                    frameCount: Int(frameCount),
-                    sampleRate: sampleRate
-                )
-                return noErr
-            }
+            state.resetGain()
+            let node = Self.makeSourceNode(format: format, sampleRate: sampleRate, state: state)
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
             sourceNode = node
+            nodeSampleRate = sampleRate
         }
 
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
@@ -270,29 +387,40 @@ final class AudioEngine: ObservableObject {
             return false
         }
 
-        if keepAwakeActivity == nil {
-            keepAwakeActivity = ProcessInfo.processInfo.beginActivity(
-                options: [.userInitiated, .idleSystemSleepDisabled],
-                reason: "NeuraWave brainwave audio session"
-            )
-        }
+        beginKeepAwake()
         isPlaying = true
         return true
+    }
+
+    /// Built outside the main actor on purpose: the render block runs on the
+    /// realtime audio thread and must not inherit main-actor isolation.
+    private nonisolated static func makeSourceNode(
+        format: AVAudioFormat,
+        sampleRate: Double,
+        state: RealtimeState
+    ) -> AVAudioSourceNode {
+        AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList -> OSStatus in
+            state.render(
+                buffers: UnsafeMutableAudioBufferListPointer(audioBufferList),
+                frameCount: Int(frameCount),
+                sampleRate: sampleRate
+            )
+            return noErr
+        }
     }
 
     /// Live parameter change without rebuilding the node: the render thread
     /// crossfades through silence, so switching is click-free.
     func switchTo(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) {
+        lastConfig = (preset, style, volume, noiseEnabled)
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
     }
 
     func stop() {
         state.setRunning(false)
         isPlaying = false
-        if let activity = keepAwakeActivity {
-            ProcessInfo.processInfo.endActivity(activity)
-            keepAwakeActivity = nil
-        }
+        isPaused = false
+        endKeepAwake()
 
         // Let the fade-out finish (~2s) before tearing the node down. A newer
         // start() bumps stopGeneration, so this can never kill a live session.
@@ -300,27 +428,123 @@ final class AudioEngine: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
             guard let self, self.stopGeneration == generation else { return }
             self.teardownNode()
+            self.isPlaying = false
         }
     }
 
     func update(volume: Float, noiseEnabled: Bool) {
+        if let cfg = lastConfig {
+            lastConfig = (cfg.preset, cfg.style, volume, noiseEnabled)
+        }
         state.update(volume: volume, noiseEnabled: noiseEnabled)
     }
 
-    /// Pause/resume keep the session alive: the render thread fades the gain
-    /// to zero and back, so AirPods toggles are click-free.
+    /// Pause keeps the session alive: the render thread fades the gain to
+    /// zero, then the output chain is released so a paused session neither
+    /// burns CPU rendering silence nor keeps the Mac awake.
     func pause() {
         state.setRunning(false)
+        isPaused = true
+        endKeepAwake()
+        let generation = stopGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+            guard let self, self.isPaused, self.stopGeneration == generation else { return }
+            self.teardownNode()
+        }
     }
 
-    func resume() {
-        state.setRunning(true)
+    /// Full output-chain restart: tears down and rebuilds the audio route,
+    /// clearing any system-level mute/route state that may have been applied
+    /// while the app was paused. Fades back in from silence. Returns false
+    /// when the output can't be started (e.g. the device went away).
+    @discardableResult
+    func restartAfterPause() -> Bool {
+        if sourceNode != nil, engine.isRunning {
+            // Resumed before the pause released the chain (and the device is
+            // still there): just ramp back up from wherever the fade-out got
+            // to. Tearing down mid-fade would cut the signal — a click.
+            stopGeneration += 1 // cancels the pending pause teardown
+            isPaused = false
+            state.setRunning(true)
+            beginKeepAwake()
+            isPlaying = true
+            return true
+        }
+        teardownNode()
+        guard let cfg = lastConfig else { return false }
+        return start(preset: cfg.preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.noiseEnabled)
     }
 
-    var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64) {
+    /// Something may still be coming out of the speakers (including the
+    /// tail of a stop fade), so quitting now would click.
+    var isAudible: Bool {
+        sourceNode != nil && engine.isRunning && state.diagnostics().gain > 0.001
+    }
+
+    var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
         state.diagnostics()
     }
 
+    /// Every request is either applied by the render thread or superseded by
+    /// a newer one before it could be; anything else was lost.
+    var switchRequests: (requested: UInt64, coalesced: UInt64) {
+        state.requests()
+    }
+
+    /// A device switch usually fires several notifications in a row (and our
+    /// own rebuild may add one); coalesce them into a single rebuild.
+    private func scheduleRebuildAfterConfigurationChange() {
+        pendingRebuild?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingRebuild = nil
+            self?.handleConfigurationChange()
+        }
+        pendingRebuild = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    /// Autotest hook: behave exactly as if the output device had changed.
+    func simulateConfigurationChange() {
+        // A real device switch stops the engine before notifying.
+        engine.stop()
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine)
+    }
+
+    private func handleConfigurationChange() {
+        // Only an active session needs the chain back. A paused one is rebuilt
+        // on resume anyway; idle has nothing to restore.
+        guard isPlaying, !isPaused, sourceNode != nil, let cfg = lastConfig else { return }
+        // Nothing actually changed for us (e.g. the notification our own
+        // rebuild can trigger): rebuilding again would cut the fade-in and,
+        // worst case, loop forever.
+        if engine.isRunning, engine.outputNode.outputFormat(forBus: 0).sampleRate == nodeSampleRate {
+            return
+        }
+        deviceRebuilds += 1
+        teardownNode()
+        if !start(preset: cfg.preset, style: cfg.style, volume: cfg.volume, withNoise: cfg.noiseEnabled) {
+            isPlaying = false
+            onOutputFailure?()
+        }
+    }
+
+    private func beginKeepAwake() {
+        guard keepAwakeActivity == nil else { return }
+        keepAwakeActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleSystemSleepDisabled],
+            reason: "NeuraWave brainwave audio session"
+        )
+    }
+
+    private func endKeepAwake() {
+        if let activity = keepAwakeActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            keepAwakeActivity = nil
+        }
+    }
+
+    /// Releases the output chain. Session state (isPlaying/isPaused) is the
+    /// caller's business, so a paused session survives its node going away.
     private func teardownNode() {
         engine.stop()
         if let node = sourceNode {
@@ -328,14 +552,14 @@ final class AudioEngine: ObservableObject {
             engine.detach(node)
             sourceNode = nil
         }
-        if let activity = keepAwakeActivity {
-            ProcessInfo.processInfo.endActivity(activity)
-            keepAwakeActivity = nil
-        }
-        isPlaying = false
+        endKeepAwake()
     }
 
     deinit {
-        teardownNode()
+        // AVAudioEngine stops itself when released; only the observer needs
+        // explicit removal. (The app-wide instance lives for the whole run.)
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+        }
     }
 }

@@ -4,11 +4,11 @@ import SwiftUI
 struct ContentView: View {
     @State private var selected = BrainwavePreset.all[3]
     @State private var style: ToneStyle = .binaural
-    @State private var volume: Double = 0.55
+    @State private var volume: Double = VolumeLevel.defaultValue
     @State private var noiseOn = false
     @State private var minutes: Int? = nil
     @State private var selectedProgram: FocusProgram?
-    @StateObject private var session = SessionController.shared
+    @ObservedObject private var session = SessionController.shared
 
     private let columns = [
         GridItem(.flexible(), spacing: 8),
@@ -21,7 +21,7 @@ struct ContentView: View {
         let savedPreset = defaults.string(forKey: "preset")
         _selected = State(initialValue: BrainwavePreset.all.first { $0.id == savedPreset } ?? BrainwavePreset.byId("focus"))
         _style = State(initialValue: ToneStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .binaural)
-        _volume = State(initialValue: defaults.object(forKey: "volume") as? Double ?? 0.55)
+        _volume = State(initialValue: VolumeLevel.sanitized(defaults.object(forKey: "volume") as? Double))
         _noiseOn = State(initialValue: defaults.bool(forKey: "noise"))
         let savedMinutes = defaults.integer(forKey: "minutes")
         _minutes = State(initialValue: savedMinutes > 0 ? savedMinutes : nil)
@@ -35,7 +35,8 @@ struct ContentView: View {
             sectionLabel("Focus programs — auto-advancing sequences")
             programRow
 
-            WaveformView(isPlaying: session.isPlaying, beat: selected.beat, color: selected.color)
+            let wavePreset = session.isPlaying ? session.currentPreset : selected
+            WaveformView(isPlaying: session.isPlaying, isPaused: session.isPaused, beat: wavePreset.beat, color: wavePreset.color)
                 .frame(height: 76)
 
             sectionLabel("Presets")
@@ -55,6 +56,21 @@ struct ContentView: View {
             UserDefaults.standard.set(newValue, forKey: "noise")
             session.updateLive(volume: volume, noiseEnabled: newValue)
         }
+        // Presets changed outside the grid (AirPods / Control Center skip,
+        // menu bar) move the selection too, including while the window was
+        // closed. Program steps don't: they are the program's, not yours.
+        .onChange(of: session.currentPreset.id) { _, _ in syncSelectionWithSession() }
+        .onChange(of: session.isPlaying) { _, _ in syncSelectionWithSession() }
+        .onAppear { syncSelectionWithSession() }
+    }
+
+    private func syncSelectionWithSession() {
+        let current = session.currentPreset
+        guard session.isPlaying, !session.isRunningProgram,
+              BrainwavePreset.all.contains(where: { $0.id == current.id }),
+              current.id != selected.id else { return }
+        selected = current
+        UserDefaults.standard.set(current.id, forKey: "preset")
     }
 
     @ViewBuilder
@@ -148,6 +164,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
+                .accessibilityAddTraits(isOn ? .isSelected : [])
                 .disabled(session.isPlaying)
                 .opacity(session.isPlaying ? 0.55 : 1)
             }
@@ -221,6 +238,9 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .disabled(session.isRunningProgram)
+        .opacity(session.isRunningProgram ? 0.55 : 1)
     }
 
     private var styleRow: some View {
@@ -234,8 +254,10 @@ struct ContentView: View {
             .labelsHidden()
             .onChange(of: style) { _, newStyle in
                 UserDefaults.standard.set(newStyle.rawValue, forKey: "style")
+                // Keep whatever is playing (a program step, or a preset
+                // skipped to from AirPods) and only change the style.
                 session.switchPreset(
-                    preset: selected,
+                    preset: session.isPlaying ? session.currentPreset : selected,
                     style: newStyle,
                     volume: volume,
                     withNoise: noiseOn
@@ -268,7 +290,8 @@ struct ContentView: View {
         HStack(spacing: 10) {
             Image(systemName: "speaker.fill")
                 .foregroundStyle(.secondary)
-            Slider(value: $volume, in: 0.05...1.0)
+            Slider(value: $volume, in: VolumeLevel.range)
+                .accessibilityLabel("Volume")
             Image(systemName: "speaker.wave.3.fill")
                 .foregroundStyle(.secondary)
         }
@@ -294,12 +317,14 @@ struct ContentView: View {
                     Button("No timer") {
                         minutes = nil
                         UserDefaults.standard.set(0, forKey: "minutes")
+                        session.updateTimer(minutes: nil)
                     }
                     Divider()
                     ForEach(durations, id: \.self) { duration in
                         Button("\(duration) minutes") {
                             minutes = duration
                             UserDefaults.standard.set(duration, forKey: "minutes")
+                            session.updateTimer(minutes: duration)
                         }
                     }
                 } label: {
@@ -327,10 +352,27 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if session.isPlaying {
+                // Pause/Resume sits beside Stop, so a paused session can
+                // still be stopped from the window.
+                Button {
+                    session.togglePlayPause()
+                } label: {
+                    Image(systemName: session.isPaused ? "play.fill" : "pause.fill")
+                        .font(.headline)
+                        .frame(width: 18)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color(nsColor: .quaternarySystemFill)))
+                }
+                .buttonStyle(.plain)
+                .help(session.isPaused ? "Resume" : "Pause")
+                .accessibilityLabel(session.isPaused ? "Resume" : "Pause")
+                .keyboardShortcut(.space, modifiers: [])
+            }
+
             Button {
-                if session.isPlaying && session.isPaused {
-                    session.resumePlayback()
-                } else if session.isPlaying {
+                if session.isPlaying {
                     session.stop()
                 } else if let program = selectedProgram {
                     session.startProgram(program, style: style, volume: volume, withNoise: noiseOn)
@@ -345,8 +387,8 @@ struct ContentView: View {
                 }
             } label: {
                 Label(
-                    session.isPlaying ? (session.isPaused ? "Resume" : "Stop") : "Start",
-                    systemImage: session.isPlaying ? (session.isPaused ? "play.fill" : "stop.fill") : "play.fill"
+                    session.isPlaying ? "Stop" : "Start",
+                    systemImage: session.isPlaying ? "stop.fill" : "play.fill"
                 )
                 .font(.headline)
                 .padding(.horizontal, 20)
@@ -361,6 +403,14 @@ struct ContentView: View {
                 .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
+            // Space starts (and, via the Pause button, pauses/resumes);
+            // ⌘. stops — the standard macOS "stop" shortcut.
+            .keyboardShortcut(
+                session.isPlaying
+                    ? KeyboardShortcut(".", modifiers: .command)
+                    : KeyboardShortcut(.space, modifiers: [])
+            )
+            .help(session.isPlaying ? "Stop (⌘.)" : "Start (Space)")
         }
     }
 
