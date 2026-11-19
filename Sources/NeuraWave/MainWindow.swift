@@ -1,4 +1,5 @@
 import AppKit
+import NeuraWaveCore
 
 /// The app's single main window.
 @MainActor

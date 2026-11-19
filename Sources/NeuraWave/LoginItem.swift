@@ -1,4 +1,5 @@
 import AppKit
+import NeuraWaveCore
 import ServiceManagement
 
 /// Launch at Login, via SMAppService.

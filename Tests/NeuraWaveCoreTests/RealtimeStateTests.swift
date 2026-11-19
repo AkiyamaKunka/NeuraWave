@@ -1,6 +1,6 @@
 import AVFoundation
+@testable import NeuraWaveCore
 import XCTest
-@testable import NeuraWave
 
 /// Drives the realtime render path directly, the way the audio thread does.
 final class RealtimeStateTests: XCTestCase {

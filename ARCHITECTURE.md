@@ -39,6 +39,17 @@ README's code map.
     format actually changed).
 - **RealtimeState** is the only code on the audio thread.
 
+## Modules
+
+Everything below the menu bar and window lives in the `NeuraWaveCore`
+library, which has no AppKit in it and builds for macOS and iOS. The macOS
+app (`NeuraWave`) adds the window, the menu bar, Launch at Login and the
+self-test, which plugs into the session through the `SessionSelfTest`
+protocol. Platform differences inside the core are small `#if os(macOS)`
+blocks in `AudioEngine` (IO buffer size, keep-awake) and the Now Playing
+artwork. The core's tests (`NeuraWaveCoreTests`) also run on the iOS
+simulator.
+
 ## The audio thread rule
 
 The render callback must never block for long, never allocate, and never lose

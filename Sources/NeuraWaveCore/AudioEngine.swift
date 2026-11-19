@@ -3,13 +3,13 @@ import AVFoundation
 /// Main-thread only (SessionController, menu bar, notifications on .main).
 /// The realtime render path lives in `RealtimeState` and never touches this.
 @MainActor
-final class AudioEngine {
+public final class AudioEngine {
     /// A session is active (playing or paused); false once stopped.
-    private(set) var isPlaying = false
+    public private(set) var isPlaying = false
 
     /// Called on the main thread when the output can't be (re)started after
     /// a device change, so the session can stop instead of "playing" silence.
-    var onOutputFailure: (() -> Void)?
+    public var onOutputFailure: (() -> Void)?
 
     /// How long after stop/pause the output chain is released: the 2 s fade
     /// plus a margin, so the fade is never cut off.
@@ -36,9 +36,9 @@ final class AudioEngine {
     nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
     private var pendingRebuild: DispatchWorkItem?
     /// Output-chain rebuilds after device changes (autotest diagnostics).
-    private(set) var deviceRebuilds = 0
+    public private(set) var deviceRebuilds = 0
 
-    init() {
+    public init() {
         // Output device / sample-rate changes (AirPods connecting, headphones
         // unplugged, …) stop AVAudioEngine. Rebuild the chain at the new
         // format so an active session keeps playing.
@@ -56,7 +56,7 @@ final class AudioEngine {
     /// Builds the output node on first use and (re)uses it for every later
     /// session. Returns false when no usable output device/format is available.
     @discardableResult
-    func start(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) -> Bool {
+    public func start(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) -> Bool {
         stopGeneration += 1
         isPaused = false
         lastConfig = Config(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
@@ -127,12 +127,12 @@ final class AudioEngine {
 
     /// Live parameter change without rebuilding the node: the render thread
     /// crossfades through silence, so switching is click-free.
-    func switchTo(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) {
+    public func switchTo(preset: BrainwavePreset, style: ToneStyle, volume: Float, withNoise noiseEnabled: Bool) {
         lastConfig = Config(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
         state.configure(preset: preset, style: style, volume: volume, noiseEnabled: noiseEnabled)
     }
 
-    func stop() {
+    public func stop() {
         state.setRunning(false)
         isPlaying = false
         isPaused = false
@@ -148,7 +148,7 @@ final class AudioEngine {
         }
     }
 
-    func update(volume: Float, noiseEnabled: Bool) {
+    public func update(volume: Float, noiseEnabled: Bool) {
         lastConfig?.volume = volume
         lastConfig?.noiseEnabled = noiseEnabled
         state.update(volume: volume, noiseEnabled: noiseEnabled)
@@ -157,7 +157,7 @@ final class AudioEngine {
     /// Pause keeps the session alive: the render thread fades the gain to
     /// zero, then the output chain is released so a paused session neither
     /// burns CPU rendering silence nor keeps the Mac awake.
-    func pause() {
+    public func pause() {
         state.setRunning(false)
         isPaused = true
         endKeepAwake()
@@ -173,7 +173,7 @@ final class AudioEngine {
     /// while the app was paused. Fades back in from silence. Returns false
     /// when the output can't be started (e.g. the device went away).
     @discardableResult
-    func restartAfterPause() -> Bool {
+    public func restartAfterPause() -> Bool {
         if sourceNode != nil, engine.isRunning {
             // Resumed before the pause released the chain (and the device is
             // still there): just ramp back up from wherever the fade-out got
@@ -192,17 +192,17 @@ final class AudioEngine {
 
     /// Something may still be coming out of the speakers (including the
     /// tail of a stop fade), so quitting now would click.
-    var isAudible: Bool {
+    public var isAudible: Bool {
         sourceNode != nil && engine.isRunning && state.diagnostics().gain > 0.001
     }
 
-    var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
+    public var diagnostics: (frames: UInt64, nan: UInt64, clips: UInt64, switches: UInt64, gain: Float) {
         state.diagnostics()
     }
 
     /// Every request is either applied by the render thread or superseded by
     /// a newer one before it could be; anything else was lost.
-    var switchRequests: (requested: UInt64, coalesced: UInt64) {
+    public var switchRequests: (requested: UInt64, coalesced: UInt64) {
         state.requests()
     }
 
@@ -219,7 +219,7 @@ final class AudioEngine {
     }
 
     /// Autotest hook: behave exactly as if the output device had changed.
-    func simulateConfigurationChange() {
+    public func simulateConfigurationChange() {
         // A real device switch stops the engine before notifying.
         engine.stop()
         NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine)
@@ -248,6 +248,7 @@ final class AudioEngine {
     /// default ~11 ms means far fewer audio wakeups, for less CPU and energy. Switches and pauses are fades of
     /// 60 ms or more anyway. Best effort: the device may clamp or refuse it.
     private func requestLargeIOBuffer() {
+        #if os(macOS)
         guard let unit = engine.outputNode.audioUnit else { return }
         // Stay inside what the device allows (Bluetooth outputs such as
         // AirPods cap it, e.g. at 960 frames ≈ 20 ms; still fewer wakeups).
@@ -268,14 +269,22 @@ final class AudioEngine {
             &frames,
             UInt32(MemoryLayout<UInt32>.size)
         )
+        #else
+        // iOS: the audio session owns the IO buffer; it clamps per route.
+        try? AVAudioSession.sharedInstance().setPreferredIOBufferDuration(0.04)
+        #endif
     }
 
+    /// Keeps an idle Mac from sleeping mid-session. iOS needs nothing:
+    /// background audio keeps playing with the screen locked.
     private func beginKeepAwake() {
+        #if os(macOS)
         guard keepAwakeActivity == nil else { return }
         keepAwakeActivity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiated, .idleSystemSleepDisabled],
             reason: "NeuraWave brainwave audio session"
         )
+        #endif
     }
 
     private func endKeepAwake() {

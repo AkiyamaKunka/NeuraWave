@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import NeuraWaveCore
 
 /// Menu bar item so a session keeps running (and can be controlled) after the
 /// window is closed. The window is optional; the sound is not.

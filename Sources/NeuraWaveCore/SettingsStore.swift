@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Keys are unchanged from earlier versions, so existing settings carry over.
 /// Invalid or out-of-range stored values fall back to sensible defaults.
-struct SettingsStore {
+public struct SettingsStore {
     private enum Key {
         static let preset = "preset"
         static let style = "style"
@@ -22,7 +22,7 @@ struct SettingsStore {
     /// Saved volumes used to be linear amplitudes; now they are positions on
     /// the squared (perceptual) curve. Convert once so an existing user's
     /// level sounds exactly as loud as before.
-    func migrateVolumeCurveIfNeeded() {
+    public func migrateVolumeCurveIfNeeded() {
         guard defaults.integer(forKey: Key.volumeCurve) < 2 else { return }
         if let linear = defaults.object(forKey: Key.volume) as? Double, linear.isFinite, linear > 0 {
             defaults.set(VolumeLevel.sanitized(linear.squareRoot()), forKey: Key.volume)
@@ -30,13 +30,18 @@ struct SettingsStore {
         defaults.set(2, forKey: Key.volumeCurve)
     }
 
-    static var standard: SettingsStore { SettingsStore(defaults: .standard) }
+    public static var standard: SettingsStore { SettingsStore(defaults: .standard) }
 
-    static let defaultPresetID = "focus"
+    public static let defaultPresetID = "focus"
 
-    let defaults: UserDefaults
+    public let defaults: UserDefaults
 
-    var preset: BrainwavePreset {
+    /// `.standard` for the app; a suite for tests (or an App Group later).
+    public init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    public var preset: BrainwavePreset {
         get {
             let id = defaults.string(forKey: Key.preset)
             return BrainwavePreset.all.first { $0.id == id } ?? BrainwavePreset.byId(Self.defaultPresetID)
@@ -44,23 +49,23 @@ struct SettingsStore {
         nonmutating set { defaults.set(newValue.id, forKey: Key.preset) }
     }
 
-    var style: ToneStyle {
+    public var style: ToneStyle {
         get { ToneStyle(rawValue: defaults.string(forKey: Key.style) ?? "") ?? .binaural }
         nonmutating set { defaults.set(newValue.rawValue, forKey: Key.style) }
     }
 
-    var volume: Double {
+    public var volume: Double {
         get { VolumeLevel.sanitized(defaults.object(forKey: Key.volume) as? Double) }
         nonmutating set { defaults.set(newValue, forKey: Key.volume) }
     }
 
-    var noise: Bool {
+    public var noise: Bool {
         get { defaults.bool(forKey: Key.noise) }
         nonmutating set { defaults.set(newValue, forKey: Key.noise) }
     }
 
     /// Sleep timer in minutes; nil = no timer.
-    var minutes: Int? {
+    public var minutes: Int? {
         get {
             let value = defaults.integer(forKey: Key.minutes)
             return value > 0 ? value : nil
@@ -69,7 +74,7 @@ struct SettingsStore {
     }
 
     /// The focus program picked in the window; nil = play a single preset.
-    var program: FocusProgram? {
+    public var program: FocusProgram? {
         get {
             let id = defaults.string(forKey: Key.program)
             return FocusProgram.all.first { $0.id == id }
@@ -78,7 +83,7 @@ struct SettingsStore {
     }
 
     /// Settings saved by an earlier version exist (this isn't a fresh install).
-    var hasEarlierVersionSettings: Bool {
+    public var hasEarlierVersionSettings: Bool {
         [Key.preset, Key.style, Key.volume, Key.program, Key.minutes, Key.noise]
             .contains { defaults.object(forKey: $0) != nil }
     }
@@ -87,9 +92,9 @@ struct SettingsStore {
     /// slider moved. On the first launch of this version, someone updating
     /// who never moved it keeps that level; fresh installs get the softer
     /// new default. Runs once.
-    static let earlierDefaultVolume = 0.55
+    public static let earlierDefaultVolume = 0.55
 
-    func keepEarlierDefaultVolumeIfNeeded() {
+    public func keepEarlierDefaultVolumeIfNeeded() {
         guard !defaults.bool(forKey: Key.checkedEarlierDefaultVolume) else { return }
         if hasEarlierVersionSettings, defaults.object(forKey: Key.volume) == nil {
             defaults.set(Self.earlierDefaultVolume, forKey: Key.volume)
@@ -97,7 +102,7 @@ struct SettingsStore {
         defaults.set(true, forKey: Key.checkedEarlierDefaultVolume)
     }
 
-    var didApplyDefaultLoginItem: Bool {
+    public var didApplyDefaultLoginItem: Bool {
         get { defaults.bool(forKey: Key.didApplyDefaultLoginItem) }
         nonmutating set { defaults.set(newValue, forKey: Key.didApplyDefaultLoginItem) }
     }

@@ -1,5 +1,5 @@
+@testable import NeuraWaveCore
 import XCTest
-@testable import NeuraWave
 
 final class SessionClockTests: XCTestCase {
     private let t0 = Date(timeIntervalSinceReferenceDate: 1_000_000)

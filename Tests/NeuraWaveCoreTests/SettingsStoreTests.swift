@@ -1,5 +1,5 @@
+@testable import NeuraWaveCore
 import XCTest
-@testable import NeuraWave
 
 final class SettingsStoreTests: XCTestCase {
     private var suiteName = ""

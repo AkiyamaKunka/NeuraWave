@@ -1,5 +1,5 @@
+@testable import NeuraWaveCore
 import XCTest
-@testable import NeuraWave
 
 final class ModelsTests: XCTestCase {
     private func program(_ id: String) -> FocusProgram {

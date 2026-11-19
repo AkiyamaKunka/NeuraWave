@@ -1,5 +1,5 @@
 import XCTest
-@testable import NeuraWave
+@testable import NeuraWaveCore
 
 final class IsochronicTests: XCTestCase {
     private let sampleRate = 48_000.0

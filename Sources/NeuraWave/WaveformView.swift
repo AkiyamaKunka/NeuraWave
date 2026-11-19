@@ -1,4 +1,5 @@
 import AppKit
+import NeuraWaveCore
 import QuartzCore
 import SwiftUI
 

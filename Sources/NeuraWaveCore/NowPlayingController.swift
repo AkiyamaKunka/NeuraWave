@@ -1,16 +1,25 @@
+#if canImport(AppKit)
 import AppKit
+#else
+import UIKit
+#endif
 import MediaPlayer
 
 /// Now Playing / remote-control bridge: registers NeuraWave as the macOS
 /// Now Playing app so AirPods gestures (single-press = toggle play/pause,
 /// double-press = next/previous preset) and the Control Center widget work.
 @MainActor
-final class NowPlayingController {
-    static let shared = NowPlayingController()
+public final class NowPlayingController {
+    public static let shared = NowPlayingController()
 
-    /// The app icon as Control Center / Now Playing artwork.
+    /// The app icon as Control Center / Now Playing artwork. iOS can't load
+    /// the app icon itself, so the app bundles a "NowPlayingArtwork" image.
     private lazy var artwork: MPMediaItemArtwork? = {
+        #if canImport(AppKit)
         guard let icon = NSApp?.applicationIconImage else { return nil }
+        #else
+        guard let icon = UIImage(named: "NowPlayingArtwork") else { return nil }
+        #endif
         return MPMediaItemArtwork(boundsSize: icon.size) { _ in icon }
     }()
 
@@ -43,13 +52,13 @@ final class NowPlayingController {
 
     /// Programs own their preset sequence, so AirPods double-press skipping
     /// is turned off while one runs.
-    func setSkipEnabled(_ enabled: Bool) {
+    public func setSkipEnabled(_ enabled: Bool) {
         let center = MPRemoteCommandCenter.shared()
         center.nextTrackCommand.isEnabled = enabled
         center.previousTrackCommand.isEnabled = enabled
     }
 
-    func update(title: String, elapsed: TimeInterval, duration: TimeInterval?, playing: Bool, paused: Bool) {
+    public func update(title: String, elapsed: TimeInterval, duration: TimeInterval?, playing: Bool, paused: Bool) {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: "NeuraWave",
@@ -70,7 +79,7 @@ final class NowPlayingController {
         center.playbackState = playing && !paused ? .playing : .paused
     }
 
-    func clear() {
+    public func clear() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         MPNowPlayingInfoCenter.default().playbackState = .stopped
     }

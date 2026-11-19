@@ -1,3 +1,4 @@
+import NeuraWaveCore
 import SwiftUI
 
 /// The main window: holds the user's current choices (saved as they change)
