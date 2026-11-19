@@ -16,7 +16,8 @@
 #   ASC_KEY_ID             App Store Connect team API key ID (Admin role: cloud signing
 #                          creates the distribution certificate and profile itself)
 #   ASC_ISSUER_ID          issuer ID shown above the key list (a UUID)
-#   ASC_API_KEY_P8_BASE64  the AuthKey_<KEYID>.p8 file, base64
+#   ASC_API_KEY_P8         the AuthKey_<KEYID>.p8 file's text, pasted as is
+#                          (or ASC_API_KEY_P8_BASE64: the same file, base64)
 # Missing secrets skip the run with a warning; nothing fails.
 #
 # VARIABLES (same page, Variables tab; only needed to submit for review)
@@ -41,6 +42,10 @@ on:
         description: Also submit that version to App Review
         type: boolean
         default: false
+      existing_build:
+        description: Skip building and use this already uploaded build number ("status" just prints the review status)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -70,12 +75,13 @@ jobs:
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
           ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
         run: |
           missing=()
           [[ -n "$ASC_KEY_ID" ]] || missing+=(ASC_KEY_ID)
           [[ -n "$ASC_ISSUER_ID" ]] || missing+=(ASC_ISSUER_ID)
-          [[ -n "$ASC_API_KEY_P8_BASE64" ]] || missing+=(ASC_API_KEY_P8_BASE64)
+          [[ -n "$ASC_API_KEY_P8$ASC_API_KEY_P8_BASE64" ]] || missing+=(ASC_API_KEY_P8)
           if (( ${#missing[@]} )); then
             echo "::warning::Skipping the iOS release: missing secret(s) ${missing[*]}. See Apps/iOS/RELEASING-iOS.md."
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -99,10 +105,12 @@ jobs:
           else
             listing=${{ inputs.listing }}; submit=${{ inputs.submit }}
           fi
-          number=$((BUILD_NUMBER_OFFSET + GITHUB_RUN_NUMBER))
+          number=$((BUILD_NUMBER_OFFSET + GITHUB_RUN_NUMBER)); build=true
+          if [[ -n "${{ inputs.existing_build }}" ]]; then number=${{ inputs.existing_build }}; build=false; fi
+          [[ "$number" != status ]] || { listing=false; submit=false; }
           {
             echo "version=$version"; echo "number=$number"
-            echo "listing=$listing"; echo "submit=$submit"
+            echo "listing=$listing"; echo "submit=$submit"; echo "build=$build"
           } >> "$GITHUB_OUTPUT"
           echo "## NeuraWave iOS $version ($number): listing=$listing, submit=$submit" >> "$GITHUB_STEP_SUMMARY"
 
@@ -110,21 +118,40 @@ jobs:
         if: steps.secrets.outputs.ready == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
           ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/asc"
           key="$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
-          printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$key"
+          if [[ -n "$ASC_API_KEY_P8" ]]; then
+            printf '%s' "$ASC_API_KEY_P8" > "$key.raw"
+          else
+            printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$key.raw"
+          fi
+          # A key pasted through an editor can pick up CRs, spaces, smart dashes or lose its
+          # line breaks. Rebuild a clean PEM from the base64 body; print only its shape.
+          python3 - "$key.raw" "$key" <<'PY'
+          import base64, re, sys
+          raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          body = re.sub(r"-+\s*(BEGIN|END)[^-]*-+", " ", raw.replace("\u2014", "--").replace("\u2013", "-"))
+          body = re.sub(r"[^A-Za-z0-9+/=]", "", body)
+          der = base64.b64decode(body + "=" * (-len(body) % 4))
+          print(f"key text: {len(raw)} chars, {raw.count(chr(10))} newlines, CR={chr(13) in raw}, "
+                f"non-ASCII={sum(ord(c) > 127 for c in raw)}; decoded {len(der)} bytes")
+          lines = [body[i:i + 64] for i in range(0, len(body), 64)]
+          open(sys.argv[2], "w").write("-----BEGIN PRIVATE KEY-----\n" + "\n".join(lines) + "\n-----END PRIVATE KEY-----\n")
+          PY
+          rm -f "$key.raw"
           chmod 600 "$key"
           echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
 
       - name: Generate the Xcode project
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.secrets.outputs.ready == 'true' && steps.plan.outputs.build == 'true'
         run: brew install xcodegen && cd Apps/iOS && xcodegen
 
       - name: Archive (cloud signing)
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.secrets.outputs.ready == 'true' && steps.plan.outputs.build == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -144,7 +171,7 @@ jobs:
             -quiet
 
       - name: Upload to App Store Connect
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.secrets.outputs.ready == 'true' && steps.plan.outputs.build == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -185,6 +212,7 @@ jobs:
           python3 -m pip install --quiet --break-system-packages 'pyjwt[crypto]' requests \
             || python3 -m pip install --quiet 'pyjwt[crypto]' requests
           n=${{ steps.plan.outputs.number }}
+          if [[ "${{ inputs.existing_build }}" == status ]]; then python3 scripts/asc.py status; exit 0; fi
           python3 scripts/asc.py testflight "$n"
           if [[ "${{ steps.plan.outputs.listing }}" == true || "${{ steps.plan.outputs.submit }}" == true ]]; then
             python3 scripts/asc.py listing "$n"

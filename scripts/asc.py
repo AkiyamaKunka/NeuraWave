@@ -193,7 +193,7 @@ def set_age_rating(app_info):
     known = declaration["attributes"]
     attributes = {}
     for key, value in known.items():
-        if key in ("kidsAgeBand", "ageRatingOverride", "ageRatingOverrideV2", "koreaAgeRatingOverride", "developerAgeRatingInfoUrl"):
+        if key in ("kidsAgeBand", "developerAgeRatingInfoUrl") or "Override" in key or "Classification" in key:
             continue
         if isinstance(value, bool) or value is None and key in (
             "gambling", "unrestrictedWebAccess", "lootBox", "messagingAndChat", "userGeneratedContent",
@@ -202,14 +202,36 @@ def set_age_rating(app_info):
             attributes[key] = False
         elif isinstance(value, str) or value is None:
             attributes[key] = "NONE"
-    call("PATCH", f"/v1/ageRatingDeclarations/{declaration['id']}",
-         {"data": {"type": "ageRatingDeclarations", "id": declaration["id"], "attributes": attributes}})
-    print("age rating set")
+    # Apple adds questions over time; a new one whose type we guessed wrong comes
+    # back as a 409 naming the attribute and the type it wants. Fix and retry.
+    for _ in range(5):
+        response = call("PATCH", f"/v1/ageRatingDeclarations/{declaration['id']}",
+                        {"data": {"type": "ageRatingDeclarations", "id": declaration["id"], "attributes": attributes}},
+                        ok=(200, 409))
+        errors = response.get("errors") or []
+        if not errors:
+            print("age rating set")
+            return
+        for error in errors:
+            name = error.get("source", {}).get("pointer", "").rsplit("/", 1)[-1]
+            detail = error.get("detail", "")
+            if name not in attributes:
+                # e.g. "'x' cannot be set unless 'y' is ...": leave x alone
+                name = next((k for k in attributes if f"'{k}'" in detail), None)
+                if name is None:
+                    fail(f"age rating: {detail}")
+                attributes.pop(name)
+            elif "Expected a BOOLEAN" in detail:
+                attributes[name] = False
+            elif "Expected a" in detail:
+                attributes[name] = "NONE"
+            else:
+                attributes.pop(name)
+    fail("age rating: still rejected after 5 tries")
 
 
 def set_free_price(app):
-    if call("GET", f"/v1/apps/{app}/appPriceSchedule", ok=(200, 404)).get("data"):
-        return
+    # A new app reports an empty schedule, so always post one; posting again is harmless.
     points = call("GET", f"/v1/apps/{app}/appPricePoints", params={"filter[territory]": "USA", "limit": 200})["data"]
     free = next(p for p in points if float(p["attributes"]["customerPrice"]) == 0)
     call("POST", "/v1/appPriceSchedules", {
@@ -305,6 +327,16 @@ def submit():
     print(f"version {version['attributes']['versionString']} submitted for App Review")
 
 
+def status():
+    app = app_id()
+    for v in call("GET", f"/v1/apps/{app}/appStoreVersions", params={"filter[platform]": "IOS"})["data"]:
+        a = v["attributes"]
+        print(f"version {a['versionString']}: {a.get('appStoreState')} / {a.get('appVersionState')}")
+    for r in call("GET", "/v1/reviewSubmissions", params={"filter[app]": app, "limit": 10})["data"]:
+        a = r["attributes"]
+        print(f"review submission {r['id']}: {a.get('state')} submitted {a.get('submittedDate')}")
+
+
 if __name__ == "__main__":
     command, *args = sys.argv[1:] or ["help"]
     if command == "wait-build":
@@ -315,6 +347,8 @@ if __name__ == "__main__":
         listing(int(args[0]))
     elif command == "submit":
         submit()
+    elif command == "status":
+        status()
     else:
         print(__doc__)
         sys.exit(2)
