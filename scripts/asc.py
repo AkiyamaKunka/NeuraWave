@@ -319,15 +319,16 @@ def submit():
     by_state = {s["attributes"]["state"]: s for s in submissions}
     # After a rejection the version stays in its UNRESOLVED_ISSUES submission:
     # resubmitting means submitting that one again. Otherwise reuse a draft.
-    submission = by_state.get("UNRESOLVED_ISSUES")
-    if submission is None:
-        submission = by_state.get("READY_FOR_REVIEW") or call("POST", "/v1/reviewSubmissions", {"data": {
+    submission = by_state.get("UNRESOLVED_ISSUES") or by_state.get("READY_FOR_REVIEW") or call(
+        "POST", "/v1/reviewSubmissions", {"data": {
             "type": "reviewSubmissions", "attributes": {"platform": "IOS"},
             "relationships": {"app": ref("apps", app)}}})["data"]
-        call("POST", "/v1/reviewSubmissionItems", {"data": {
-            "type": "reviewSubmissionItems",
-            "relationships": {"reviewSubmission": ref("reviewSubmissions", submission["id"]),
-                              "appStoreVersion": ref("appStoreVersions", version["id"])}}})
+    # Editing a rejected version takes it out of its submission ("Update Review"
+    # on the website puts it back), so (re)add it; 409 means it is already in.
+    call("POST", "/v1/reviewSubmissionItems", {"data": {
+        "type": "reviewSubmissionItems",
+        "relationships": {"reviewSubmission": ref("reviewSubmissions", submission["id"]),
+                          "appStoreVersion": ref("appStoreVersions", version["id"])}}}, ok=(200, 201, 409))
     # Freshly uploaded screenshots take a few minutes to process; until then
     # Apple answers "Version is not ready to be submitted yet".
     for _ in range(30):
