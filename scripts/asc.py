@@ -328,9 +328,19 @@ def submit():
             "type": "reviewSubmissionItems",
             "relationships": {"reviewSubmission": ref("reviewSubmissions", submission["id"]),
                               "appStoreVersion": ref("appStoreVersions", version["id"])}}})
-    call("PATCH", f"/v1/reviewSubmissions/{submission['id']}", {"data": {
-        "type": "reviewSubmissions", "id": submission["id"], "attributes": {"submitted": True}}})
-    print(f"version {version['attributes']['versionString']} submitted for App Review")
+    # Freshly uploaded screenshots take a few minutes to process; until then
+    # Apple answers "Version is not ready to be submitted yet".
+    for _ in range(30):
+        response = call("PATCH", f"/v1/reviewSubmissions/{submission['id']}", {"data": {
+            "type": "reviewSubmissions", "id": submission["id"], "attributes": {"submitted": True}}}, ok=(200, 409))
+        if not response.get("errors"):
+            print(f"version {version['attributes']['versionString']} submitted for App Review")
+            return
+        if "not ready to be submitted yet" not in json.dumps(response):
+            fail(f"submit: {json.dumps(response)[:2000]}")
+        print("version still processing, retrying in 30 s")
+        time.sleep(30)
+    fail("submit: version still not ready after 15 minutes")
 
 
 def status():
