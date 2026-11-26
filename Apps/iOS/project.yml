@@ -35,5 +35,20 @@ targets:
         INFOPLIST_FILE: NeuraWave/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1"
         ENABLE_PREVIEWS: YES
+    scheme:
+      testTargets:
+        - NeuraWaveiOSUITests
+  NeuraWaveiOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: NeuraWaveiOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.akiyamakunka.NeuraWave.UITests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"

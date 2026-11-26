@@ -193,7 +193,7 @@ def set_age_rating(app_info):
     known = declaration["attributes"]
     attributes = {}
     for key, value in known.items():
-        if key in ("kidsAgeBand", "ageRatingOverride", "ageRatingOverrideV2", "koreaAgeRatingOverride", "developerAgeRatingInfoUrl"):
+        if key in ("kidsAgeBand", "developerAgeRatingInfoUrl") or "Override" in key or "Classification" in key:
             continue
         if isinstance(value, bool) or value is None and key in (
             "gambling", "unrestrictedWebAccess", "lootBox", "messagingAndChat", "userGeneratedContent",
@@ -202,14 +202,36 @@ def set_age_rating(app_info):
             attributes[key] = False
         elif isinstance(value, str) or value is None:
             attributes[key] = "NONE"
-    call("PATCH", f"/v1/ageRatingDeclarations/{declaration['id']}",
-         {"data": {"type": "ageRatingDeclarations", "id": declaration["id"], "attributes": attributes}})
-    print("age rating set")
+    # Apple adds questions over time; a new one whose type we guessed wrong comes
+    # back as a 409 naming the attribute and the type it wants. Fix and retry.
+    for _ in range(5):
+        response = call("PATCH", f"/v1/ageRatingDeclarations/{declaration['id']}",
+                        {"data": {"type": "ageRatingDeclarations", "id": declaration["id"], "attributes": attributes}},
+                        ok=(200, 409))
+        errors = response.get("errors") or []
+        if not errors:
+            print("age rating set")
+            return
+        for error in errors:
+            name = error.get("source", {}).get("pointer", "").rsplit("/", 1)[-1]
+            detail = error.get("detail", "")
+            if name not in attributes:
+                # e.g. "'x' cannot be set unless 'y' is ...": leave x alone
+                name = next((k for k in attributes if f"'{k}'" in detail), None)
+                if name is None:
+                    fail(f"age rating: {detail}")
+                attributes.pop(name)
+            elif "Expected a BOOLEAN" in detail:
+                attributes[name] = False
+            elif "Expected a" in detail:
+                attributes[name] = "NONE"
+            else:
+                attributes.pop(name)
+    fail("age rating: still rejected after 5 tries")
 
 
 def set_free_price(app):
-    if call("GET", f"/v1/apps/{app}/appPriceSchedule", ok=(200, 404)).get("data"):
-        return
+    # A new app reports an empty schedule, so always post one; posting again is harmless.
     points = call("GET", f"/v1/apps/{app}/appPricePoints", params={"filter[territory]": "USA", "limit": 200})["data"]
     free = next(p for p in points if float(p["attributes"]["customerPrice"]) == 0)
     call("POST", "/v1/appPriceSchedules", {
@@ -293,16 +315,43 @@ def submit():
     version = next((v for v in versions if v["attributes"]["appStoreState"] in EDITABLE), None)
     if version is None:
         fail("No version waiting to be submitted (already in review or released?)")
-    submission = call("POST", "/v1/reviewSubmissions", {"data": {
-        "type": "reviewSubmissions", "attributes": {"platform": "IOS"},
-        "relationships": {"app": ref("apps", app)}}})["data"]
+    submissions = call("GET", "/v1/reviewSubmissions", params={"filter[app]": app, "filter[platform]": "IOS", "limit": 20})["data"]
+    by_state = {s["attributes"]["state"]: s for s in submissions}
+    # After a rejection the version stays in its UNRESOLVED_ISSUES submission:
+    # resubmitting means submitting that one again. Otherwise reuse a draft.
+    submission = by_state.get("UNRESOLVED_ISSUES") or by_state.get("READY_FOR_REVIEW") or call(
+        "POST", "/v1/reviewSubmissions", {"data": {
+            "type": "reviewSubmissions", "attributes": {"platform": "IOS"},
+            "relationships": {"app": ref("apps", app)}}})["data"]
+    # Editing a rejected version takes it out of its submission ("Update Review"
+    # on the website puts it back), so (re)add it; 409 means it is already in.
     call("POST", "/v1/reviewSubmissionItems", {"data": {
         "type": "reviewSubmissionItems",
         "relationships": {"reviewSubmission": ref("reviewSubmissions", submission["id"]),
-                          "appStoreVersion": ref("appStoreVersions", version["id"])}}})
-    call("PATCH", f"/v1/reviewSubmissions/{submission['id']}", {"data": {
-        "type": "reviewSubmissions", "id": submission["id"], "attributes": {"submitted": True}}})
-    print(f"version {version['attributes']['versionString']} submitted for App Review")
+                          "appStoreVersion": ref("appStoreVersions", version["id"])}}}, ok=(200, 201, 409))
+    # Freshly uploaded screenshots take a few minutes to process; until then
+    # Apple answers "Version is not ready to be submitted yet".
+    for _ in range(30):
+        response = call("PATCH", f"/v1/reviewSubmissions/{submission['id']}", {"data": {
+            "type": "reviewSubmissions", "id": submission["id"], "attributes": {"submitted": True}}}, ok=(200, 409))
+        if not response.get("errors"):
+            print(f"version {version['attributes']['versionString']} submitted for App Review")
+            return
+        if "not ready to be submitted yet" not in json.dumps(response):
+            fail(f"submit: {json.dumps(response)[:2000]}")
+        print("version still processing, retrying in 30 s")
+        time.sleep(30)
+    fail("submit: version still not ready after 15 minutes")
+
+
+def status():
+    app = app_id()
+    for v in call("GET", f"/v1/apps/{app}/appStoreVersions", params={"filter[platform]": "IOS"})["data"]:
+        a = v["attributes"]
+        print(f"version {a['versionString']}: {a.get('appStoreState')} / {a.get('appVersionState')}")
+    for r in call("GET", "/v1/reviewSubmissions", params={"filter[app]": app, "limit": 10})["data"]:
+        a = r["attributes"]
+        print(f"review submission {r['id']}: {a.get('state')} submitted {a.get('submittedDate')}")
 
 
 if __name__ == "__main__":
@@ -315,6 +364,8 @@ if __name__ == "__main__":
         listing(int(args[0]))
     elif command == "submit":
         submit()
+    elif command == "status":
+        status()
     else:
         print(__doc__)
         sys.exit(2)

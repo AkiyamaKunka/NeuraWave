@@ -1,0 +1,82 @@
+# Records the iPhone app on the iOS Simulator while the scripted UI walkthrough
+# (Apps/iOS/UITests) runs, and publishes the video on the `appstore-review`
+# branch so App Review notes can link to it. Run it from the Actions tab or by
+# pushing to the ios/demo-video branch.
+name: iOS demo video
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ios/demo-video
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate the Xcode project
+        run: brew install xcodegen && cd Apps/iOS && xcodegen
+
+      - name: Boot the newest iPhone simulator
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin)["devices"]
+          best = None
+          for runtime, items in devices.items():
+              m = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              if not m:
+                  continue
+              version = (int(m.group(1)), int(m.group(2)))
+              for d in items:
+                  if d["name"].startswith("iPhone") and "Pro" in d["name"] and "Max" not in d["name"]:
+                      if best is None or version > best[0]:
+                          best = (version, d["udid"], d["name"])
+          print(best[1])
+          print(f"{best[2]} iOS {best[0][0]}.{best[0][1]}", file=sys.stderr)
+          ')
+          echo "UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4
+
+      - name: Build for testing
+        run: |
+          xcodebuild build-for-testing -project Apps/iOS/NeuraWaveiOS.xcodeproj -scheme NeuraWaveiOS \
+            -destination "id=$UDID" -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet
+
+      - name: Record the walkthrough
+        run: |
+          set -euo pipefail
+          mkdir -p review
+          xcrun simctl io "$UDID" recordVideo --codec h264 --force review/neurawave-demo.mp4 &
+          recorder=$!
+          sleep 3
+          status=0
+          xcodebuild test-without-building -project Apps/iOS/NeuraWaveiOS.xcodeproj -scheme NeuraWaveiOS \
+            -destination "id=$UDID" -derivedDataPath build -only-testing:NeuraWaveiOSUITests || status=$?
+          sleep 2
+          kill -INT "$recorder"; wait "$recorder" || true
+          ls -la review
+          exit $status
+
+      - name: Publish on the appstore-review branch
+        run: |
+          set -euo pipefail
+          cp review/neurawave-demo.mp4 "$RUNNER_TEMP/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan appstore-review
+          git rm -rfq .
+          mkdir -p review && cp "$RUNNER_TEMP/neurawave-demo.mp4" review/
+          git add review/neurawave-demo.mp4
+          git commit -qm "App Review demo video"
+          git push -f origin appstore-review
+          echo "https://github.com/$GITHUB_REPOSITORY/raw/appstore-review/review/neurawave-demo.mp4" >> "$GITHUB_STEP_SUMMARY"
