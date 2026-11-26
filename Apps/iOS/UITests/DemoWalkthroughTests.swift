@@ -6,27 +6,34 @@ import XCTest
 final class DemoWalkthroughTests: XCTestCase {
     private func pause(_ seconds: UInt32 = 2) { sleep(seconds) }
 
+    /// Taps the first element with this label, waiting briefly for it.
+    private func tap(_ query: XCUIElementQuery, _ label: String) {
+        let element = query[label].firstMatch
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "\(label) not found")
+        element.tap()
+    }
+
     func testWalkthrough() {
         let app = XCUIApplication()
         app.launch()
         pause(3)
 
         // Pick a preset, set a timer, start, pause, resume.
-        app.staticTexts["Deep Focus"].tap()
+        tap(app.staticTexts, "Calm Focus")
         pause()
-        app.buttons["No timer"].tap()
+        tap(app.buttons, "No timer")
         pause(1)
-        app.buttons["30 minutes"].tap()
+        tap(app.buttons, "30 minutes")
         pause()
-        app.buttons["Start"].tap()
+        tap(app.buttons, "Start")
         pause(5)
-        app.buttons["Pause"].tap()
+        tap(app.buttons, "Pause")
         pause()
-        app.buttons["Resume"].tap()
+        tap(app.buttons, "Resume")
         pause(3)
 
         // Sound settings: tone style, noise, then back.
-        app.buttons["Sound settings"].tap()
+        tap(app.buttons, "Sound settings")
         pause(3)
         if app.switches.firstMatch.exists {
             app.switches.firstMatch.tap()
@@ -34,20 +41,20 @@ final class DemoWalkthroughTests: XCTestCase {
             app.switches.firstMatch.tap()
             pause(1)
         }
-        app.buttons["Done"].tap()
+        tap(app.buttons, "Done")
         pause(2)
-        app.buttons["Stop"].tap()
+        tap(app.buttons, "Stop")
         pause(3)
 
         // A guided program.
-        app.buttons["Programs"].tap()
+        tap(app.buttons, "Programs")
         pause(2)
-        app.staticTexts["Study Flow"].tap()
+        tap(app.staticTexts, "Study Flow")
         pause(2)
-        app.buttons["Start"].tap()
+        tap(app.buttons, "Start")
         pause(6)
-        XCTAssertTrue(app.buttons["Stop"].exists)
-        app.buttons["Stop"].tap()
+        XCTAssertTrue(app.buttons["Stop"].firstMatch.exists)
+        tap(app.buttons, "Stop")
         pause(3)
     }
 }
