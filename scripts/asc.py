@@ -315,13 +315,19 @@ def submit():
     version = next((v for v in versions if v["attributes"]["appStoreState"] in EDITABLE), None)
     if version is None:
         fail("No version waiting to be submitted (already in review or released?)")
-    submission = call("POST", "/v1/reviewSubmissions", {"data": {
-        "type": "reviewSubmissions", "attributes": {"platform": "IOS"},
-        "relationships": {"app": ref("apps", app)}}})["data"]
-    call("POST", "/v1/reviewSubmissionItems", {"data": {
-        "type": "reviewSubmissionItems",
-        "relationships": {"reviewSubmission": ref("reviewSubmissions", submission["id"]),
-                          "appStoreVersion": ref("appStoreVersions", version["id"])}}})
+    submissions = call("GET", "/v1/reviewSubmissions", params={"filter[app]": app, "filter[platform]": "IOS", "limit": 20})["data"]
+    by_state = {s["attributes"]["state"]: s for s in submissions}
+    # After a rejection the version stays in its UNRESOLVED_ISSUES submission:
+    # resubmitting means submitting that one again. Otherwise reuse a draft.
+    submission = by_state.get("UNRESOLVED_ISSUES")
+    if submission is None:
+        submission = by_state.get("READY_FOR_REVIEW") or call("POST", "/v1/reviewSubmissions", {"data": {
+            "type": "reviewSubmissions", "attributes": {"platform": "IOS"},
+            "relationships": {"app": ref("apps", app)}}})["data"]
+        call("POST", "/v1/reviewSubmissionItems", {"data": {
+            "type": "reviewSubmissionItems",
+            "relationships": {"reviewSubmission": ref("reviewSubmissions", submission["id"]),
+                              "appStoreVersion": ref("appStoreVersions", version["id"])}}})
     call("PATCH", f"/v1/reviewSubmissions/{submission['id']}", {"data": {
         "type": "reviewSubmissions", "id": submission["id"], "attributes": {"submitted": True}}})
     print(f"version {version['attributes']['versionString']} submitted for App Review")
