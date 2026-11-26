@@ -1,14 +1,14 @@
 # Records the iPhone app on the iOS Simulator while the scripted UI walkthrough
 # (Apps/iOS/UITests) runs, and publishes the video on the `appstore-review`
 # branch so App Review notes can link to it. Run it from the Actions tab or by
-# pushing a tag ios-demo-<anything>.
+# pushing to the ios/demo-video branch.
 name: iOS demo video
 
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'ios-demo-*'
+    branches:
+      - ios/demo-video
 
 permissions:
   contents: write
